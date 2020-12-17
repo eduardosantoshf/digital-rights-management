@@ -1,2 +1,10 @@
 references:
 https://www.cloudflare.com/learning/ssl/what-happens-in-a-tls-handshake/
+
+dúvidas:
+para o user pedir a licemça, basta fazer um pedido à api? (api/license/musica)?
+quem é que define o tempo da licença? cada música tem parâmetros de licença pré-definidos? ou é o cliente que os define?
+diferença entre user e client? 1 user = 1 client?
+como guardar as licenças de cada client/user?
+as keys usadas na comunicação client-server devem ser guardadas num array ou dicionário no server?
+hash chain based scheme? explique plsssss
