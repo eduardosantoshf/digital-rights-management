@@ -1,0 +1,27 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting cryptography
+  Using cached cryptography-3.3.1-cp36-abi3-manylinux2010_x86_64.whl (2.6 MB)
+Collecting cffi>=1.12
+  Using cached cffi-1.14.4-cp38-cp38-manylinux1_x86_64.whl (411 kB)
+Collecting six>=1.4.1
+  Using cached six-1.15.0-py2.py3-none-any.whl (10 kB)
+Collecting pycparser
+  Using cached pycparser-2.20-py2.py3-none-any.whl (112 kB)
+Installing collected packages: pycparser, six, cffi, cryptography
+  Attempting uninstall: pycparser
+    Found existing installation: pycparser 2.20
+    Uninstalling pycparser-2.20:
+      Successfully uninstalled pycparser-2.20
+  Attempting uninstall: six
+    Found existing installation: six 1.15.0
+    Uninstalling six-1.15.0:
+      Successfully uninstalled six-1.15.0
+  Attempting uninstall: cffi
+    Found existing installation: cffi 1.14.4
+    Uninstalling cffi-1.14.4:
+      Successfully uninstalled cffi-1.14.4
+  Attempting uninstall: cryptography
+    Found existing installation: cryptography 3.3.1
+    Uninstalling cryptography-3.3.1:
+      Successfully uninstalled cryptography-3.3.1
+Successfully installed cffi-1.14.4 cryptography-3.3.1 pycparser-2.20 six-1.15.0

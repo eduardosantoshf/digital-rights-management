@@ -6,6 +6,10 @@ import os
 import subprocess
 import time
 import sys
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -13,6 +17,10 @@ logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.INFO)
 
 SERVER_URL = 'http://127.0.0.1:8080'
+SERVER_PUBLIC_KEY=None
+
+CLIENT_CYPHER_SUITES = ['1', '2']
+
 
 def main():
     print("|--------------------------------------|")
@@ -22,7 +30,17 @@ def main():
     # Get a list of media files
     print("Contacting Server")
     
+    req = requests.get(f'{SERVER_URL}/api/protocols', params= {"cypher_suite":CLIENT_CYPHER_SUITES})
     # TODO: Secure the session
+    req=req.json()
+    cert = x509.load_pem_x509_certificate(req['certificate'].encode())
+    print(cert.not_valid_before)
+    SERVER_PUBLIC_KEY=cert.public_key()
+    print(cert.public_key())
+
+    ciphertext = SERVER_PUBLIC_KEY.encrypt(b'helloooo',padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
+    print(ciphertext)
+    req= requests.get(f'{SERVER_URL}/api/key', params=ciphertext)
 
     req = requests.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:

@@ -7,11 +7,23 @@ import binascii
 import json
 import os
 import math
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+
+with open("MediaServerkey.pem", "rb") as key_file:
+    SERVER_PRIVATE_KEY  = serialization.load_pem_private_key(
+        key_file.read(),
+        password=None,
+    )
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
+
+SERVER_CYPHER_SUITES = ['1', '2']
+
 
 CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce': 
             {
@@ -118,6 +130,25 @@ class MediaServer(resource.Resource):
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         return json.dumps({'error': 'unknown'}, indent=4).encode('latin')
 
+    def do_get_protocols(self, request):
+        client_cypher_suites= request.args.get(b'cypher_suite')
+        chosen=None
+        for csuite in client_cypher_suites:
+            csuite= csuite.decode()
+            if  csuite in SERVER_CYPHER_SUITES:
+                chosen= csuite
+                break
+        cert = open("MediaServer.pem",'rb').read().decode()
+
+        message = b"encrypted data"
+        
+        return json.dumps({'cypher_suite':chosen, 'certificate':cert}).encode('latin')
+
+    def do_key(self,request):
+        print(request.args.get(b'teste'))[0]
+        plaintext = SERVER_PRIVATE_KEY.decrypt(request.args.get(b'teste')[0],padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
+        print(plaintext)
+
     # Handle a GET request
     def render_GET(self, request):
         logger.debug(f'Received request for {request.uri}')
@@ -125,8 +156,8 @@ class MediaServer(resource.Resource):
         try:
             if request.path == b'/api/protocols':
                 return self.do_get_protocols(request)
-            #elif request.uri == 'api/key':
-            #...
+            elif request.path == b'/api/key':
+                return self.do_key(request)
             #elif request.uri == 'api/auth':
 
             elif request.path == b'/api/list':
