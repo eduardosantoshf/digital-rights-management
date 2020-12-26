@@ -10,6 +10,8 @@ import math
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 with open("MediaServerkey.pem", "rb") as key_file:
     SERVER_PRIVATE_KEY  = serialization.load_pem_private_key(
@@ -22,7 +24,7 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
 
-SERVER_CYPHER_SUITES = ['1', '2']
+SERVER_CYPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 
 SESSIONS={}
 
@@ -131,20 +133,32 @@ class MediaServer(resource.Resource):
         request.responseHeaders.addRawHeader(b"content-type", b"application/json")
         return json.dumps({'error': 'unknown'}, indent=4).encode('latin')
 
-    def do_get_protocols(self, request):
+    def do_post_protocols(self, request):
         session = request.getSession()       
         client_cypher_suites= request.args.get(b'cypher_suite')
-        chosen=None
+        chosen = None
+
         for csuite in client_cypher_suites:
             csuite= csuite.decode()
             if  csuite in SERVER_CYPHER_SUITES:
                 chosen= csuite
                 break
+
         cert = open("MediaServer.pem",'rb').read().decode()
+
         server_random= os.urandom(28)
-        SESSIONS[session]={'cypher_suite':chosen, 'client_random':request.args.get(b'client_random')[0], 'server_random':server_random}
-        print(request.args.get(b'client_random')[0])
-        return json.dumps({'cypher_suite':chosen, 'certificate':cert, 'server_random':server_random}).encode('latin')
+        client_random = request.args[b'client_random'][0]
+
+        SESSIONS[session]={'cypher_suite':chosen, 'client_random':client_random, 'server_random':server_random}
+
+        y, p, g = self.generate_DH_parameter()
+
+        signature = self.make_signature(chosen, client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode())
+        print("signature:    ", signature)
+        print("\n")
+        
+
+        return json.dumps({'cypher_suite':chosen, 'certificate':cert, 'server_random':server_random.decode('latin'), 'signature':signature.decode('latin'), 'y':y, 'p':p, 'g':g}).encode('latin')
 
     def do_key(self,request):
         print(request.args.get(b'teste'))[0]
@@ -157,7 +171,7 @@ class MediaServer(resource.Resource):
 
         try:
             if request.path == b'/api/protocols':
-                return self.do_get_protocols(request)
+                return self.do_post_protocols(request)
             elif request.path == b'/api/key':
                 return self.do_key(request)
             #elif request.uri == 'api/auth':
@@ -181,7 +195,67 @@ class MediaServer(resource.Resource):
     def render_POST(self, request):
         logger.debug(f'Received POST for {request.uri}')
         request.setResponseCode(501)
-        return b''
+        try:
+            if request.path == b'/api/protocols':
+                return self.do_post_protocols(request)
+
+            elif request.path == b'/api/key':
+                return self.do_key(request)
+            #elif request.uri == 'api/auth':
+
+            elif request.path == b'/api/list':
+                return self.do_list(request)
+
+            elif request.path == b'/api/download':
+                return self.do_download(request)
+            else:
+                request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
+                return b'Methods: /api/protocols /api/list /api/download'
+
+        except Exception as e:
+            logger.exception(e)
+            request.setResponseCode(500)
+            request.responseHeaders.addRawHeader(b"content-type", b"text/plain")
+            return b''
+
+    def generate_DH_parameter(self):
+        parameters = dh.generate_parameters(generator = 2, key_size = 2048)
+
+        private_key = parameters.generate_private_key()
+        public_key = private_key.public_key()
+
+        y = public_key.public_numbers().y
+
+        p = parameters.parameter_numbers().p
+        g = parameters.parameter_numbers().g
+
+        return y, p, g
+    
+    def make_signature(self, cypher_suite, data):
+        if "SHA384" in cypher_suite:
+            signature = SERVER_PRIVATE_KEY.sign(
+                data,
+                padding.PSS(
+                    mgf = padding.MGF1(hashes.SHA384()),
+                    salt_length = padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA384()
+            )
+        
+        elif "SHA256" in cypher_suite:
+            signature = SERVER_PRIVATE_KEY.sign(
+                data,
+                padding.PSS(
+                    mgf = padding.MGF1(hashes.SHA256()),
+                    salt_length = padding.PSS.MAX_LENGTH
+                ),
+                hashes.SHA256()
+            )
+        
+        return signature
+
+        
+
 
 
 print("Server started")

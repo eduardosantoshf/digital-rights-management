@@ -9,6 +9,7 @@ import sys
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import dh
 
 
 logger = logging.getLogger('root')
@@ -19,7 +20,7 @@ logger.setLevel(logging.INFO)
 SERVER_URL = 'http://127.0.0.1:8080'
 SERVER_PUBLIC_KEY=None
 
-CLIENT_CYPHER_SUITES = ['1', '2']
+CLIENT_CYPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 
 s= requests.Session()
 
@@ -31,24 +32,65 @@ def main():
     # Get a list of media files
     print("Contacting Server")
     client_random = os.urandom(28)
-    req = s.get(f'{SERVER_URL}/api/protocols', params= {"cypher_suite":CLIENT_CYPHER_SUITES,"client_random":client_random})
+    req = s.post(f'{SERVER_URL}/api/protocols', data= {"cypher_suite":CLIENT_CYPHER_SUITES,"client_random":client_random})
     print(client_random)
+
     # TODO: Secure the session
     req=req.json()
+    
+    y = int(req['y'])
+    p = int(req['p'])
+    g = int(req['g'])
+
     cert = x509.load_pem_x509_certificate(req['certificate'].encode())
     print(cert.not_valid_before)
+
     SERVER_PUBLIC_KEY=cert.public_key()
-    print(cert.public_key())
+
+    if "SHA256" in req['cypher_suite']:
+        hash_type = hashes.SHA256()
+        hash_type2 = hashes.SHA256()
+    elif "SHA384" in req['cypher_suite']:
+        hash_type = hashes.SHA384()
+        hash_type2 = hashes.SHA384()
+
+    print("signature:    ", req['signature'].encode('latin'))
+    print("\n")
+
+    SERVER_PUBLIC_KEY.verify(
+        req['signature'].encode('latin'),
+        client_random + req['server_random'].encode('latin') + str(y).encode() + str(p).encode() + str(g).encode(),
+        padding.PSS(
+            mgf = padding.MGF1(hash_type),
+            salt_length = padding.PSS.MAX_LENGTH
+        ),
+        hash_type2
+    )
+
+    pn = dh.DHParameterNumbers(p, g)
+    parameters = pn.parameters()
+    peer_public_numbers = dh.DHPublicNumbers(y, pn)
+    peer_public_key = peer_public_numbers.public_key()
+
+    private_key = parameters.generate_private_key()
+    public_key = private_key.public_key()
+
+    y = public_key.public_numbers().y
+
+    print("public key:  ", public_key)
+
 
     ciphertext = SERVER_PUBLIC_KEY.encrypt(b'helloooo',padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
     print(ciphertext)
-    req= requests.get(f'{SERVER_URL}/api/key', params=ciphertext)
+    
+    req = requests.get(f'{SERVER_URL}/api/key', params=ciphertext)
 
     req = requests.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:
         print("Got Server List")
 
     media_list = req.json()
+
 
 
     # Present a simple selection menu    
