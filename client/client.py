@@ -10,6 +10,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 
 logger = logging.getLogger('root')
@@ -36,7 +37,7 @@ def main():
     print(client_random)
 
     # TODO: Secure the session
-    req=req.json()
+    req = req.json()
     
     y = int(req['y'])
     p = int(req['p'])
@@ -45,7 +46,7 @@ def main():
     cert = x509.load_pem_x509_certificate(req['certificate'].encode())
     print(cert.not_valid_before)
 
-    SERVER_PUBLIC_KEY=cert.public_key()
+    SERVER_PUBLIC_KEY = cert.public_key()
 
     if "SHA256" in req['cypher_suite']:
         hash_type = hashes.SHA256()
@@ -53,9 +54,6 @@ def main():
     elif "SHA384" in req['cypher_suite']:
         hash_type = hashes.SHA384()
         hash_type2 = hashes.SHA384()
-
-    print("signature:    ", req['signature'].encode('latin'))
-    print("\n")
 
     SERVER_PUBLIC_KEY.verify(
         req['signature'].encode('latin'),
@@ -69,6 +67,7 @@ def main():
 
     pn = dh.DHParameterNumbers(p, g)
     parameters = pn.parameters()
+    
     peer_public_numbers = dh.DHPublicNumbers(y, pn)
     peer_public_key = peer_public_numbers.public_key()
 
@@ -77,7 +76,9 @@ def main():
 
     y = public_key.public_numbers().y
 
-    print("public key:  ", public_key)
+    #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
+
+    #print("server's public key:  ", peer_public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
 
 
     ciphertext = SERVER_PUBLIC_KEY.encrypt(b'helloooo',padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))

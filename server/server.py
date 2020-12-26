@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 with open("MediaServerkey.pem", "rb") as key_file:
     SERVER_PRIVATE_KEY  = serialization.load_pem_private_key(
@@ -135,30 +136,30 @@ class MediaServer(resource.Resource):
 
     def do_post_protocols(self, request):
         session = request.getSession()       
-        client_cypher_suites= request.args.get(b'cypher_suite')
-        chosen = None
+        client_cypher_suites = request.args.get(b'cypher_suite')
+        chosen_cypher_suite = None
 
         for csuite in client_cypher_suites:
-            csuite= csuite.decode()
-            if  csuite in SERVER_CYPHER_SUITES:
-                chosen= csuite
+            csuite = csuite.decode()
+            if csuite in SERVER_CYPHER_SUITES:
+                chosen_cypher_suite = csuite
                 break
 
         cert = open("MediaServer.pem",'rb').read().decode()
 
-        server_random= os.urandom(28)
+        # server and client's randoms
+        server_random = os.urandom(28)
         client_random = request.args[b'client_random'][0]
 
-        SESSIONS[session]={'cypher_suite':chosen, 'client_random':client_random, 'server_random':server_random}
+        SESSIONS[session] = {'cypher_suite':chosen_cypher_suite, 'client_random':client_random, 'server_random':server_random}
 
+        # generate DH parameters: y, p (large prime), g (primitive root mod p)
         y, p, g = self.generate_DH_parameter()
 
-        signature = self.make_signature(chosen, client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode())
-        print("signature:    ", signature)
-        print("\n")
-        
+        # generate signature
+        signature = self.make_signature(chosen_cypher_suite, client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode())
 
-        return json.dumps({'cypher_suite':chosen, 'certificate':cert, 'server_random':server_random.decode('latin'), 'signature':signature.decode('latin'), 'y':y, 'p':p, 'g':g}).encode('latin')
+        return json.dumps({'cypher_suite':chosen_cypher_suite, 'certificate':cert, 'server_random':server_random.decode('latin'), 'signature':signature.decode('latin'), 'y':y, 'p':p, 'g':g}).encode('latin')
 
     def do_key(self,request):
         print(request.args.get(b'teste'))[0]
@@ -195,6 +196,7 @@ class MediaServer(resource.Resource):
     def render_POST(self, request):
         logger.debug(f'Received POST for {request.uri}')
         request.setResponseCode(501)
+
         try:
             if request.path == b'/api/protocols':
                 return self.do_post_protocols(request)
@@ -221,8 +223,11 @@ class MediaServer(resource.Resource):
     def generate_DH_parameter(self):
         parameters = dh.generate_parameters(generator = 2, key_size = 2048)
 
+        # generate server's private and public keys
         private_key = parameters.generate_private_key()
         public_key = private_key.public_key()
+
+        #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
 
         y = public_key.public_numbers().y
 
