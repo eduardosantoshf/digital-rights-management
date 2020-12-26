@@ -24,6 +24,7 @@ logger.setLevel(logging.DEBUG)
 
 SERVER_CYPHER_SUITES = ['1', '2']
 
+SESSIONS={}
 
 CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce': 
             {
@@ -131,6 +132,7 @@ class MediaServer(resource.Resource):
         return json.dumps({'error': 'unknown'}, indent=4).encode('latin')
 
     def do_get_protocols(self, request):
+        session = request.getSession()       
         client_cypher_suites= request.args.get(b'cypher_suite')
         chosen=None
         for csuite in client_cypher_suites:
@@ -139,10 +141,10 @@ class MediaServer(resource.Resource):
                 chosen= csuite
                 break
         cert = open("MediaServer.pem",'rb').read().decode()
-
-        message = b"encrypted data"
-        
-        return json.dumps({'cypher_suite':chosen, 'certificate':cert}).encode('latin')
+        server_random= os.urandom(28)
+        SESSIONS[session]={'cypher_suite':chosen, 'client_random':request.args.get(b'client_random')[0], 'server_random':server_random}
+        print(request.args.get(b'client_random')[0])
+        return json.dumps({'cypher_suite':chosen, 'certificate':cert, 'server_random':server_random}).encode('latin')
 
     def do_key(self,request):
         print(request.args.get(b'teste'))[0]

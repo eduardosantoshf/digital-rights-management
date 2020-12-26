@@ -6,6 +6,8 @@ https://www.ibm.com/support/knowledgecenter/SSFKSJ_9.0.0/com.ibm.mq.sec.doc/q009
 https://www.thesslstore.com/blog/explaining-ssl-handshake/
 https://www.cloudflare.com/learning/ssl/what-is-a-session-key/
 
+https://docs.twistedmatrix.com/en/twisted-18.9.0/web/howto/using-twistedweb.html
+
 dúvidas:
 
 cliente fornece varias e o servidor escolhe uma aleatoriamente

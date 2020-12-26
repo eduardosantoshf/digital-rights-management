@@ -21,6 +21,7 @@ SERVER_PUBLIC_KEY=None
 
 CLIENT_CYPHER_SUITES = ['1', '2']
 
+s= requests.Session()
 
 def main():
     print("|--------------------------------------|")
@@ -29,8 +30,9 @@ def main():
 
     # Get a list of media files
     print("Contacting Server")
-    
-    req = requests.get(f'{SERVER_URL}/api/protocols', params= {"cypher_suite":CLIENT_CYPHER_SUITES})
+    client_random = os.urandom(28)
+    req = s.get(f'{SERVER_URL}/api/protocols', params= {"cypher_suite":CLIENT_CYPHER_SUITES,"client_random":client_random})
+    print(client_random)
     # TODO: Secure the session
     req=req.json()
     cert = x509.load_pem_x509_certificate(req['certificate'].encode())
