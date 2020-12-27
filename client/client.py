@@ -8,11 +8,11 @@ import time
 import sys
 from cryptography import x509
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives.asymmetric import dh
+from cryptography.hazmat.primitives import serialization, hashes, hmac
+from cryptography.hazmat.primitives import padding as real_padding
+from cryptography.hazmat.primitives.asymmetric import padding, dh
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 
 logger = logging.getLogger('root')
@@ -27,14 +27,14 @@ with open("client_private_key.pem", "rb") as key_file:
     )
 
 SERVER_URL = 'http://127.0.0.1:8080'
-SERVER_PUBLIC_KEY=None
+SERVER_PUBLIC_KEY = None
 
 CLIENT_CERTIFICATE = open("client_cert.pem",'rb').read().decode()
 
 CLIENT_CYPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
+CHOSEN_CYPHER_SUITE = None
 
-CHOSEN_CYPHER_SUITE= None
-s= requests.Session()
+s = requests.Session()
 
 def getSessionkeys(cypher_suite, dh_key,client_random,server_random):
     if "SHA384" in cypher_suite:
@@ -54,16 +54,14 @@ def getSessionkeys(cypher_suite, dh_key,client_random,server_random):
 
         key = hkdf.derive(dh_key)
 
-        client_write_MAC_key = key[:size]
-        server_write_MAC_key = key[size:size*2]
-        client_write_key = key[size*2:size*2+32]
-        server_write_key = key[size*2+32:size*2+64]
+        c_w_mac_k = key[:size]
+        s_w_mac_k = key[size:size*2]
+        c_w_k = key[size*2:size*2+32]
+        s_w_k = key[size*2+32:size*2+64]
 
-        #print(client_write_MAC_key, server_write_MAC_key, client_write_key, server_write_key)
+    return c_w_mac_k, s_w_mac_k, c_w_k, s_w_k
 
-    return client_write_MAC_key, server_write_MAC_key, client_write_key, server_write_key
-
-def make_signature(cypher_suite,data):
+def make_signature(cypher_suite, data):
     if "SHA384" in cypher_suite:
         signature = CLIENT_PRIVATE_KEY.sign(
             data,
@@ -85,6 +83,49 @@ def make_signature(cypher_suite,data):
         )
     
     return signature
+
+def encrypt_comunication(cypher_suite, data):
+    if "AES256" in cypher_suite:
+        iv = os.urandom(16)
+        cipher = Cipher(
+            algorithms.AES(CLIENT_WRITE_KEY),
+            modes.CBC(iv)
+        )
+        encryptor = cipher.encryptor()
+
+        encrypted_data = encryptor.update(padding_data(data, 128)) + encryptor.finalize()
+
+    return iv + generate_hmac(CLIENT_WRITE_MAC_KEY, cypher_suite, encrypted_data + iv) + encrypted_data
+
+def decrypt_comunication(cypher_suite, data, iv):
+    if "AES256" in cypher_suite:
+        cipher = Cipher(
+            algorithms.AES(CLIENT_WRITE_KEY),
+            modes.CBC(CLIENT_IV)
+        )
+        decryptor = cipher.decryptor()
+
+        decrypted_data = decryptor.update(data) + decryptor.finalize()
+
+    return decrypted_data
+
+def padding_data(data, bits):
+    padder = real_padding.PKCS7(bits).padder()
+    padded_data = padder.update(data)
+    padded_data += padder.finalize()
+
+    return padded_data
+
+def generate_hmac(key, cypher_suite, data):
+    if "SHA256" in cypher_suite:
+        h = hmac.HMAC(key, hashes.SHA256())
+        h.update(data)
+    
+    elif "SHA384" in cypher_suite:
+        h = hmac.HMAC(key, hashes.SHA384())
+        h.update(data)
+
+    return h.finalize()
 
 def main():
     print("|--------------------------------------|")
@@ -145,13 +186,21 @@ def main():
     req = s.post(f'{SERVER_URL}/api/key', data={'certificate': CLIENT_CERTIFICATE , 'DH_PARAMETER':y, 'signature': signature})
 
     shared_key = private_key.exchange(peer_public_key)
-    client_write_MAC_key, server_write_MAC_key, client_write_key, server_write_key = getSessionkeys(CHOSEN_CYPHER_SUITE, shared_key,client_random,server_random)
+
+    global CLIENT_WRITE_MAC_KEY
+    global CLIENT_WRITE_KEY
+    global SERVER_WRITE_MAC_KEY
+    global SERVER_WRITE_KEY
+
+    CLIENT_WRITE_MAC_KEY, SERVER_WRITE_MAC_KEY, CLIENT_WRITE_KEY, SERVER_WRITE_KEY = getSessionkeys(CHOSEN_CYPHER_SUITE, shared_key,client_random,server_random)
     
     #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
 
     #print("server's public key:  ", peer_public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
 
-    
+    req = s.get(f'{SERVER_URL}/' + encrypt_comunication(CHOSEN_CYPHER_SUITE, b"api/finished").decode("latin"))
+
+
     
 
     req = requests.get(f'{SERVER_URL}/api/list')

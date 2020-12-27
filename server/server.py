@@ -8,12 +8,12 @@ import json
 import os
 import math
 from cryptography import x509
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization, hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 with open("MediaServerkey.pem", "rb") as key_file:
     SERVER_PRIVATE_KEY  = serialization.load_pem_private_key(
@@ -195,8 +195,10 @@ class MediaServer(resource.Resource):
             elif request.path == b'/api/download':
                 return self.do_download(request)
             else:
-                request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
-                return b'Methods: /api/protocols /api/list /api/download'
+                self.decrypt_comunication(request.getSession(), request.path[1:])
+        
+                #request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
+                #return b'Methods: /api/protocols /api/list /api/download'
 
         except Exception as e:
             logger.exception(e)
@@ -240,8 +242,6 @@ class MediaServer(resource.Resource):
         
         public_key = private_key.public_key()
 
-        #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
-
         y = public_key.public_numbers().y
 
         p = parameters.parameter_numbers().p
@@ -250,6 +250,49 @@ class MediaServer(resource.Resource):
         SESSIONS[session]['parameters']=dh.DHParameterNumbers(p, g)
         SESSIONS[session]['DH_private_key']= private_key
         return y, p, g
+
+    def decrypt_comunication(self, session, data):
+        cipher_suite = SESSIONS[session]['cypher_suite']
+        client_write_key = SESSIONS[session]['client_write_key']
+        client_write_MAC_key = SESSIONS[session]['client_write_MAC_key']
+
+        if "AES256" in cipher_suite:
+            iv_size = 16
+        if "AES256-GCM" in cipher_suite:
+            iv_size = 12
+
+        if "SHA384" in cipher_suite:
+            iv = data[:iv_size]
+            hmac = data[iv_size:iv_size + 48]
+            new_data = iv + data[iv_size + 48:]
+
+        elif "SHA256" in cipher_suite:
+            iv = data[:iv_size]
+            hmac = data[iv_size:iv_size + 32]
+            new_data = iv + data[iv_size + 32:]
+
+        print("hmac received:    ", hmac)
+
+        print("generated hmac:    ", self.generate_hmac(client_write_MAC_key, cipher_suite, new_data).decode("latin").encode())
+
+        print("equal?    ", hmac == self.generate_hmac(client_write_MAC_key, cipher_suite, new_data))
+
+
+
+
+
+    def generate_hmac(self, key, cypher_suite, data):
+        if "SHA256" in cypher_suite:
+            h = hmac.HMAC(key, hashes.SHA256())
+            h.update(data)
+        
+        elif "SHA384" in cypher_suite:
+            h = hmac.HMAC(key, hashes.SHA384())
+            h.update(data)
+
+        return h.finalize()
+
+
     
     def make_signature(self, cypher_suite, data):
         if "SHA384" in cypher_suite:
