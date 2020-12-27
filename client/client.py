@@ -67,7 +67,6 @@ def main():
 
     pn = dh.DHParameterNumbers(p, g)
     parameters = pn.parameters()
-    
     peer_public_numbers = dh.DHPublicNumbers(y, pn)
     peer_public_key = peer_public_numbers.public_key()
 
