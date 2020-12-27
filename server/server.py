@@ -10,6 +10,7 @@ import math
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization, hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import padding as real_padding
 from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
@@ -195,8 +196,12 @@ class MediaServer(resource.Resource):
             elif request.path == b'/api/download':
                 return self.do_download(request)
             else:
-                self.decrypt_comunication(request.getSession(), request.path[1:])
-        
+                path =self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
+                if path == b'api/finished':
+                    SESSIONS[request.getSession()]['finished']= True
+                    s=self.encrypt_comunication(b'finished',request.getSession() )
+                    print(s)
+                    return json.dumps({'data':s.decode("latin")}).encode('latin')
                 #request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 #return b'Methods: /api/protocols /api/list /api/download'
 
@@ -251,6 +256,31 @@ class MediaServer(resource.Resource):
         SESSIONS[session]['DH_private_key']= private_key
         return y, p, g
 
+    def encrypt_comunication(self,data,session):
+        cipher_suite = SESSIONS[session]['cypher_suite']
+        server_write_key = SESSIONS[session]['server_write_key']
+        server_write_MAC_key = SESSIONS[session]['server_write_MAC_key']
+
+        if "AES256" in cipher_suite:
+            iv = os.urandom(16)
+            cipher = Cipher(
+                algorithms.AES(server_write_key),
+                modes.CBC(iv)
+            )
+        elif "AES256-GCM" in cipher_suite:
+            """
+            iv= os.urandom(12)
+            cipher = Cipher(
+                algorithms.AES(CLIENT_WRITE_KEY),
+                modes.(iv)
+            )
+            """
+        encryptor = cipher.encryptor()
+
+        encrypted_data = encryptor.update(self.padding_data(data, 128)) + encryptor.finalize()
+
+        return iv + self.generate_hmac(server_write_MAC_key, cipher_suite,   iv +encrypted_data) + encrypted_data
+
     def decrypt_comunication(self, session, data):
         cipher_suite = SESSIONS[session]['cypher_suite']
         client_write_key = SESSIONS[session]['client_write_key']
@@ -258,30 +288,57 @@ class MediaServer(resource.Resource):
 
         if "AES256" in cipher_suite:
             iv_size = 16
-        if "AES256-GCM" in cipher_suite:
+        elif "AES256-GCM" in cipher_suite:
             iv_size = 12
 
         if "SHA384" in cipher_suite:
             iv = data[:iv_size]
             hmac = data[iv_size:iv_size + 48]
-            new_data = iv + data[iv_size + 48:]
+            h_data = iv + data[iv_size + 48:]
+            m_data = data[iv_size + 48:]
 
         elif "SHA256" in cipher_suite:
             iv = data[:iv_size]
             hmac = data[iv_size:iv_size + 32]
-            new_data = iv + data[iv_size + 32:]
+            h_data = iv + data[iv_size + 32:]
+            m_data =data[iv_size + 32:]
 
-        print("hmac received:    ", hmac)
+        if hmac == self.generate_hmac(client_write_MAC_key, cipher_suite, h_data):
+            m_data = self.decrypt_symetric(client_write_key,iv,cipher_suite,m_data)
+            unpadded_data = self.unpadding_data(m_data,128)
+            return unpadded_data
 
-        print("generated hmac:    ", self.generate_hmac(client_write_MAC_key, cipher_suite, new_data).decode("latin").encode())
+        else:
+            return 0
 
-        print("equal?    ", hmac == self.generate_hmac(client_write_MAC_key, cipher_suite, new_data))
+    def padding_data(self,data, bits):
+        padder = real_padding.PKCS7(bits).padder()
+        padded_data = padder.update(data)
+        padded_data += padder.finalize()
 
+        return padded_data
 
+    def unpadding_data(self,data,nbits):
+        unpadder = real_padding.PKCS7(nbits).unpadder()
+        unpadded_data = unpadder.update(data)
+        unpadded_data += unpadder.finalize()
 
+        return unpadded_data
 
+    def decrypt_symetric(self,key,iv,cypher_suite,data):
+        if "AES256" in cypher_suite:
+            cipher = Cipher(
+                algorithms.AES(key),
+                modes.CBC(iv)
+            )
+            decryptor = cipher.decryptor()
+
+            decrypted_data = decryptor.update(data) + decryptor.finalize()
+
+        return decrypted_data
 
     def generate_hmac(self, key, cypher_suite, data):
+        print("data",data)
         if "SHA256" in cypher_suite:
             h = hmac.HMAC(key, hashes.SHA256())
             h.update(data)

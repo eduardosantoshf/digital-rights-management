@@ -91,17 +91,51 @@ def encrypt_comunication(cypher_suite, data):
             algorithms.AES(CLIENT_WRITE_KEY),
             modes.CBC(iv)
         )
-        encryptor = cipher.encryptor()
-
-        encrypted_data = encryptor.update(padding_data(data, 128)) + encryptor.finalize()
-
-    return iv + generate_hmac(CLIENT_WRITE_MAC_KEY, cypher_suite, encrypted_data + iv) + encrypted_data
-
-def decrypt_comunication(cypher_suite, data, iv):
-    if "AES256" in cypher_suite:
+    elif "AES256-GCM" in cypher_suite:
+        """
+        iv= os.urandom(12)
         cipher = Cipher(
             algorithms.AES(CLIENT_WRITE_KEY),
-            modes.CBC(CLIENT_IV)
+            modes.(iv)
+        )
+        """
+    encryptor = cipher.encryptor()
+
+    encrypted_data = encryptor.update(padding_data(data, 128)) + encryptor.finalize()
+
+    return iv + generate_hmac(CLIENT_WRITE_MAC_KEY, cypher_suite,   iv +encrypted_data) + encrypted_data
+
+def decrypt_comunication(s_w_k, s_w_m_k,cipher_suite, data):
+    if "AES256" in cipher_suite:
+        iv_size = 16
+    elif "AES256-GCM" in cipher_suite:
+        iv_size = 12
+
+    if "SHA384" in cipher_suite:
+        iv = data[:iv_size]
+        hmac = data[iv_size:iv_size + 48]
+        h_data = iv + data[iv_size + 48:]
+        m_data = data[iv_size + 48:]
+
+    elif "SHA256" in cipher_suite:
+        iv = data[:iv_size]
+        hmac = data[iv_size:iv_size + 32]
+        h_data = iv + data[iv_size + 32:]
+        m_data =data[iv_size + 32:]
+
+
+    if hmac == generate_hmac(s_w_m_k, cipher_suite, h_data):
+        m_data = decrypt_symetric(s_w_k,iv,cipher_suite,m_data)
+        unpadded_data = unpadding_data(m_data,128)
+        return unpadded_data
+    else:
+        return 0
+
+def decrypt_symetric(key,iv,cipher_suite,data):
+    if "AES256" in cipher_suite:
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CBC(iv)
         )
         decryptor = cipher.decryptor()
 
@@ -116,7 +150,15 @@ def padding_data(data, bits):
 
     return padded_data
 
+def unpadding_data(data,nbits):
+    unpadder = real_padding.PKCS7(nbits).unpadder()
+    unpadded_data = unpadder.update(data)
+    unpadded_data += unpadder.finalize()
+
+    return unpadded_data
+
 def generate_hmac(key, cypher_suite, data):
+    print("data",data)
     if "SHA256" in cypher_suite:
         h = hmac.HMAC(key, hashes.SHA256())
         h.update(data)
@@ -197,10 +239,14 @@ def main():
     #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
 
     #print("server's public key:  ", peer_public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
+    e= encrypt_comunication(CHOSEN_CYPHER_SUITE, b"api/finished")
+    req = s.get(f'{SERVER_URL}/', params={'data':e})
+    req= req.json()
+    finished_data = req['data'].encode('latin')
 
-    req = s.get(f'{SERVER_URL}/' + encrypt_comunication(CHOSEN_CYPHER_SUITE, b"api/finished").decode("latin"))
+    message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CYPHER_SUITE,finished_data)
 
-
+    print(message)
     
 
     req = requests.get(f'{SERVER_URL}/api/list')
