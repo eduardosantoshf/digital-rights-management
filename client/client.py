@@ -7,6 +7,7 @@ import subprocess
 import time
 import sys
 from cryptography import x509
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -34,6 +35,29 @@ CLIENT_CYPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256'
 
 CHOSEN_CYPHER_SUITE= None
 s= requests.Session()
+
+def getSessionkeys(cypher_suite, dh_key,client_random,server_random):
+    if "SHA384" in cypher_suite:
+        hash_type = hashes.SHA384()
+        size=48
+    elif "SHA256" in cypher_suite:
+        hash_type = hashes.SHA256()
+        size=32
+
+    if "AES256" in cypher_suite:
+        hkdf= HKDF(
+            algorithm =hash_type,
+            length = 64 + size*2,
+            salt= client_random+server_random,
+            info=None
+        )
+        key= hkdf.derive(dh_key)
+        c_w_m_k=key[:size]
+        s_w_m_k=key[size:size*2]
+        c_w_k=key[size*2:size*2+32]
+        s_w_k=key[size*2+32:size*2+64]
+        print(c_w_m_k,s_w_m_k,c_w_k,s_w_k)
+    return c_w_m_k,s_w_m_k,c_w_k,s_w_k
 
 def make_signature(cypher_suite,data):
     if "SHA384" in cypher_suite:
@@ -112,11 +136,10 @@ def main():
     y = public_key.public_numbers().y
 
     signature = make_signature(CHOSEN_CYPHER_SUITE, client_random + server_random + str(y).encode())
-    print(signature)
     req = s.post(f'{SERVER_URL}/api/key', data={'certificate': CLIENT_CERTIFICATE , 'DH_PARAMETER':y, 'signature': signature})
 
     shared_key = private_key.exchange(peer_public_key)
-    print(shared_key)
+    c_w_m_k,s_w_m_k,c_w_k,s_w_k=getSessionkeys(CHOSEN_CYPHER_SUITE, shared_key,client_random,server_random)
     #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
 
     #print("server's public key:  ", peer_public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
