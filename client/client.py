@@ -7,6 +7,8 @@ import subprocess
 import time
 import sys
 from cryptography import x509
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.asymmetric import dh
@@ -18,12 +20,67 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.INFO)
 
+with open("client_private_key.pem", "rb") as key_file:
+    CLIENT_PRIVATE_KEY  = serialization.load_pem_private_key(
+        key_file.read(),
+        password=None,
+    )
+
 SERVER_URL = 'http://127.0.0.1:8080'
 SERVER_PUBLIC_KEY=None
 
+CLIENT_CERTIFICATE = open("client_cert.pem",'rb').read().decode()
+
 CLIENT_CYPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 
+CHOSEN_CYPHER_SUITE= None
 s= requests.Session()
+
+def getSessionkeys(cypher_suite, dh_key,client_random,server_random):
+    if "SHA384" in cypher_suite:
+        hash_type = hashes.SHA384()
+        size=48
+    elif "SHA256" in cypher_suite:
+        hash_type = hashes.SHA256()
+        size=32
+
+    if "AES256" in cypher_suite:
+        hkdf= HKDF(
+            algorithm =hash_type,
+            length = 64 + size*2,
+            salt= client_random+server_random,
+            info=None
+        )
+        key= hkdf.derive(dh_key)
+        c_w_m_k=key[:size]
+        s_w_m_k=key[size:size*2]
+        c_w_k=key[size*2:size*2+32]
+        s_w_k=key[size*2+32:size*2+64]
+        print(c_w_m_k,s_w_m_k,c_w_k,s_w_k)
+    return c_w_m_k,s_w_m_k,c_w_k,s_w_k
+
+def make_signature(cypher_suite,data):
+    if "SHA384" in cypher_suite:
+        signature = CLIENT_PRIVATE_KEY.sign(
+            data,
+            padding.PSS(
+                mgf = padding.MGF1(hashes.SHA384()),
+                salt_length = padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA384()
+        )
+    
+    elif "SHA256" in cypher_suite:
+        signature = CLIENT_PRIVATE_KEY.sign(
+            data,
+            padding.PSS(
+                mgf = padding.MGF1(hashes.SHA256()),
+                salt_length = padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+    
+    return signature
 
 def main():
     print("|--------------------------------------|")
@@ -39,6 +96,8 @@ def main():
     # TODO: Secure the session
     req = req.json()
     
+    server_random = req['server_random'].encode('latin')
+
     y = int(req['y'])
     p = int(req['p'])
     g = int(req['g'])
@@ -47,17 +106,17 @@ def main():
     print(cert.not_valid_before)
 
     SERVER_PUBLIC_KEY = cert.public_key()
-
-    if "SHA256" in req['cypher_suite']:
+    CHOSEN_CYPHER_SUITE = req['cypher_suite']
+    if "SHA256" in CHOSEN_CYPHER_SUITE:
         hash_type = hashes.SHA256()
         hash_type2 = hashes.SHA256()
-    elif "SHA384" in req['cypher_suite']:
+    elif "SHA384" in CHOSEN_CYPHER_SUITE:
         hash_type = hashes.SHA384()
         hash_type2 = hashes.SHA384()
 
     SERVER_PUBLIC_KEY.verify(
         req['signature'].encode('latin'),
-        client_random + req['server_random'].encode('latin') + str(y).encode() + str(p).encode() + str(g).encode(),
+        client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode(),
         padding.PSS(
             mgf = padding.MGF1(hash_type),
             salt_length = padding.PSS.MAX_LENGTH
@@ -75,15 +134,17 @@ def main():
 
     y = public_key.public_numbers().y
 
+    signature = make_signature(CHOSEN_CYPHER_SUITE, client_random + server_random + str(y).encode())
+    req = s.post(f'{SERVER_URL}/api/key', data={'certificate': CLIENT_CERTIFICATE , 'DH_PARAMETER':y, 'signature': signature})
+
+    shared_key = private_key.exchange(peer_public_key)
+    c_w_m_k,s_w_m_k,c_w_k,s_w_k=getSessionkeys(CHOSEN_CYPHER_SUITE, shared_key,client_random,server_random)
     #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
 
     #print("server's public key:  ", peer_public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
 
-
-    ciphertext = SERVER_PUBLIC_KEY.encrypt(b'helloooo',padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
-    print(ciphertext)
     
-    req = requests.get(f'{SERVER_URL}/api/key', params=ciphertext)
+    
 
     req = requests.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:

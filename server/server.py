@@ -7,6 +7,7 @@ import binascii
 import json
 import os
 import math
+from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -154,7 +155,7 @@ class MediaServer(resource.Resource):
         SESSIONS[session] = {'cypher_suite':chosen_cypher_suite, 'client_random':client_random, 'server_random':server_random}
 
         # generate DH parameters: y, p (large prime), g (primitive root mod p)
-        y, p, g = self.generate_DH_parameter()
+        y, p, g = self.generate_DH_parameter(session)
 
         # generate signature
         signature = self.make_signature(chosen_cypher_suite, client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode())
@@ -162,9 +163,16 @@ class MediaServer(resource.Resource):
         return json.dumps({'cypher_suite':chosen_cypher_suite, 'certificate':cert, 'server_random':server_random.decode('latin'), 'signature':signature.decode('latin'), 'y':y, 'p':p, 'g':g}).encode('latin')
 
     def do_key(self,request):
-        print(request.args.get(b'teste'))[0]
-        plaintext = SERVER_PRIVATE_KEY.decrypt(request.args.get(b'teste')[0],padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
-        print(plaintext)
+        session = request.getSession()
+        cypher_suite= SESSIONS[session]['cypher_suite']
+        print(request.args[b'certificate'][0])
+        cert = x509.load_pem_x509_certificate(request.args[b'certificate'][0])
+        print(cert.not_valid_before)
+        DH_key = self.get_DH_Key(session,int(request.args[b'DH_PARAMETER'][0].decode()),cypher_suite)
+        CLIENT_PUBLIC_KEY = cert.public_key()
+        self.verify_signature(request.args[b'signature'][0], cypher_suite,CLIENT_PUBLIC_KEY, SESSIONS[session]['client_random']+ SESSIONS[session]['server_random'] + request.args[b'DH_PARAMETER'][0])
+        self.getSessionkeys(session,cypher_suite,DH_key)
+        
 
     # Handle a GET request
     def render_GET(self, request):
@@ -220,11 +228,12 @@ class MediaServer(resource.Resource):
             request.responseHeaders.addRawHeader(b"content-type", b"text/plain")
             return b''
 
-    def generate_DH_parameter(self):
+    def generate_DH_parameter(self,session):
         parameters = dh.generate_parameters(generator = 2, key_size = 2048)
 
         # generate server's private and public keys
         private_key = parameters.generate_private_key()
+        
         public_key = private_key.public_key()
 
         #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
@@ -234,6 +243,8 @@ class MediaServer(resource.Resource):
         p = parameters.parameter_numbers().p
         g = parameters.parameter_numbers().g
 
+        SESSIONS[session]['parameters']=dh.DHParameterNumbers(p, g)
+        SESSIONS[session]['DH_private_key']= private_key
         return y, p, g
     
     def make_signature(self, cypher_suite, data):
@@ -259,8 +270,52 @@ class MediaServer(resource.Resource):
         
         return signature
 
-        
+    def verify_signature(self,signature,cypher_suite,pub_key,data):
+        if "SHA384" in cypher_suite:
+            hash_type = hashes.SHA384()
+            hash_type2 = hashes.SHA384()
 
+        elif "SHA256" in cypher_suite:
+            hash_type = hashes.SHA256()
+            hash_type2 = hashes.SHA256()
+
+        pub_key.verify(
+            signature,
+            data,
+            padding.PSS(
+                mgf = padding.MGF1(hash_type),
+                salt_length = padding.PSS.MAX_LENGTH
+            ),
+            hash_type2
+        )
+
+    def get_DH_Key(self, session,y,cipher_suite):
+        peer_public_numbers = dh.DHPublicNumbers(y, SESSIONS[session]['parameters'])
+        peer_public_key = peer_public_numbers.public_key()
+        shared_key = SESSIONS[session]['DH_private_key'].exchange(peer_public_key)
+        return shared_key
+
+    def getSessionkeys(self,session,cypher_suite, dh_key):
+        if "SHA384" in cypher_suite:
+            hash_type = hashes.SHA384()
+            size=48
+        elif "SHA256" in cypher_suite:
+            hash_type = hashes.SHA256()
+            size=32
+
+        if "AES256" in cypher_suite:
+            hkdf= HKDF(
+                algorithm =hash_type,
+                length = 64 + size*2,
+                salt= SESSIONS[session]['client_random']+SESSIONS[session]['server_random'],
+                info=None
+            )
+            key= hkdf.derive(dh_key)
+            SESSIONS[session]['client_write_MAC_key']=key[:size]
+            SESSIONS[session]['server_write_MAC_key']=key[size:size*2]
+            SESSIONS[session]['client_write_key']=key[size*2:size*2+32]
+            SESSIONS[session]['server_write_key']=key[size*2+32:size*2+64]
+            print(SESSIONS[session])
 
 
 print("Server started")
