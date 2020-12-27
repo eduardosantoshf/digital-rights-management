@@ -164,12 +164,16 @@ class MediaServer(resource.Resource):
 
     def do_key(self,request):
         session = request.getSession()
-        cypher_suite= SESSIONS[session]['cypher_suite']
+
+        cypher_suite = SESSIONS[session]['cypher_suite']
         print(request.args[b'certificate'][0])
+
         cert = x509.load_pem_x509_certificate(request.args[b'certificate'][0])
         print(cert.not_valid_before)
+
         DH_key = self.get_DH_Key(session,int(request.args[b'DH_PARAMETER'][0].decode()),cypher_suite)
         CLIENT_PUBLIC_KEY = cert.public_key()
+
         self.verify_signature(request.args[b'signature'][0], cypher_suite,CLIENT_PUBLIC_KEY, SESSIONS[session]['client_random']+ SESSIONS[session]['server_random'] + request.args[b'DH_PARAMETER'][0])
         self.getSessionkeys(session,cypher_suite,DH_key)
         
@@ -298,24 +302,27 @@ class MediaServer(resource.Resource):
     def getSessionkeys(self,session,cypher_suite, dh_key):
         if "SHA384" in cypher_suite:
             hash_type = hashes.SHA384()
-            size=48
+            size = 48
         elif "SHA256" in cypher_suite:
             hash_type = hashes.SHA256()
-            size=32
+            size = 32
 
         if "AES256" in cypher_suite:
-            hkdf= HKDF(
-                algorithm =hash_type,
-                length = 64 + size*2,
-                salt= SESSIONS[session]['client_random']+SESSIONS[session]['server_random'],
-                info=None
+            hkdf = HKDF(
+                algorithm = hash_type,
+                length = 64 + size * 2,
+                salt = SESSIONS[session]['client_random'] + SESSIONS[session]['server_random'],
+                info = None
             )
-            key= hkdf.derive(dh_key)
+            key = hkdf.derive(dh_key)
+
+            # divide the key into 4 different keys
             SESSIONS[session]['client_write_MAC_key']=key[:size]
             SESSIONS[session]['server_write_MAC_key']=key[size:size*2]
             SESSIONS[session]['client_write_key']=key[size*2:size*2+32]
             SESSIONS[session]['server_write_key']=key[size*2+32:size*2+64]
-            print(SESSIONS[session])
+
+            #print(SESSIONS[session])
 
 
 print("Server started")

@@ -39,25 +39,29 @@ s= requests.Session()
 def getSessionkeys(cypher_suite, dh_key,client_random,server_random):
     if "SHA384" in cypher_suite:
         hash_type = hashes.SHA384()
-        size=48
+        size = 48
     elif "SHA256" in cypher_suite:
         hash_type = hashes.SHA256()
-        size=32
+        size = 32
 
     if "AES256" in cypher_suite:
-        hkdf= HKDF(
-            algorithm =hash_type,
+        hkdf = HKDF(
+            algorithm = hash_type,
             length = 64 + size*2,
-            salt= client_random+server_random,
-            info=None
+            salt = client_random+server_random,
+            info = None
         )
-        key= hkdf.derive(dh_key)
-        c_w_m_k=key[:size]
-        s_w_m_k=key[size:size*2]
-        c_w_k=key[size*2:size*2+32]
-        s_w_k=key[size*2+32:size*2+64]
-        print(c_w_m_k,s_w_m_k,c_w_k,s_w_k)
-    return c_w_m_k,s_w_m_k,c_w_k,s_w_k
+
+        key = hkdf.derive(dh_key)
+
+        client_write_MAC_key = key[:size]
+        server_write_MAC_key = key[size:size*2]
+        client_write_key = key[size*2:size*2+32]
+        server_write_key = key[size*2+32:size*2+64]
+
+        #print(client_write_MAC_key, server_write_MAC_key, client_write_key, server_write_key)
+
+    return client_write_MAC_key, server_write_MAC_key, client_write_key, server_write_key
 
 def make_signature(cypher_suite,data):
     if "SHA384" in cypher_suite:
@@ -107,6 +111,7 @@ def main():
 
     SERVER_PUBLIC_KEY = cert.public_key()
     CHOSEN_CYPHER_SUITE = req['cypher_suite']
+    
     if "SHA256" in CHOSEN_CYPHER_SUITE:
         hash_type = hashes.SHA256()
         hash_type2 = hashes.SHA256()
@@ -126,9 +131,11 @@ def main():
 
     pn = dh.DHParameterNumbers(p, g)
     parameters = pn.parameters()
+
     peer_public_numbers = dh.DHPublicNumbers(y, pn)
     peer_public_key = peer_public_numbers.public_key()
 
+    # generating client's private and public keys
     private_key = parameters.generate_private_key()
     public_key = private_key.public_key()
 
@@ -138,7 +145,8 @@ def main():
     req = s.post(f'{SERVER_URL}/api/key', data={'certificate': CLIENT_CERTIFICATE , 'DH_PARAMETER':y, 'signature': signature})
 
     shared_key = private_key.exchange(peer_public_key)
-    c_w_m_k,s_w_m_k,c_w_k,s_w_k=getSessionkeys(CHOSEN_CYPHER_SUITE, shared_key,client_random,server_random)
+    client_write_MAC_key, server_write_MAC_key, client_write_key, server_write_key = getSessionkeys(CHOSEN_CYPHER_SUITE, shared_key,client_random,server_random)
+    
     #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
 
     #print("server's public key:  ", peer_public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
