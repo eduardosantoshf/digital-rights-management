@@ -235,6 +235,7 @@ class MediaServer(resource.Resource):
 
             elif request.path == b'/api/key':
                 return self.do_key(request)
+            
             #elif request.uri == 'api/auth':
 
             elif request.path == b'/api/list':
@@ -243,8 +244,23 @@ class MediaServer(resource.Resource):
             elif request.path == b'/api/download':
                 return self.do_download(request)
             else:
-                request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
-                return b'Methods: /api/protocols /api/list /api/download'
+                data = self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
+
+                data = json.loads(data.decode("latin"))
+
+                path = data['url']
+
+                if path == 'api/auth':
+                    
+                    print(data['certificate'])
+
+
+                    #s = self.encrypt_comunication(b'finished',request.getSession() )
+                    #return json.dumps({'data':s.decode("latin")}).encode('latin')
+                
+
+                #request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
+                #return b'Methods: /api/protocols /api/list /api/download'
 
         except Exception as e:
             logger.exception(e)

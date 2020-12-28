@@ -6,6 +6,8 @@ import os
 import subprocess
 import time
 import sys
+import PyKCS11
+import binascii
 from cryptography import x509
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import serialization, hashes, hmac
@@ -13,6 +15,7 @@ from cryptography.hazmat.primitives import padding as real_padding
 from cryptography.hazmat.primitives.asymmetric import padding, dh
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.x509.oid import NameOID
 
 
 logger = logging.getLogger('root')
@@ -61,9 +64,9 @@ def getSessionkeys(cypher_suite, dh_key,client_random,server_random):
 
     return c_w_mac_k, s_w_mac_k, c_w_k, s_w_k
 
-def make_signature(cypher_suite, data):
+def make_signature(cypher_suite, data, key = CLIENT_PRIVATE_KEY):
     if "SHA384" in cypher_suite:
-        signature = CLIENT_PRIVATE_KEY.sign(
+        signature = key.sign(
             data,
             padding.PSS(
                 mgf = padding.MGF1(hashes.SHA384()),
@@ -73,7 +76,7 @@ def make_signature(cypher_suite, data):
         )
     
     elif "SHA256" in cypher_suite:
-        signature = CLIENT_PRIVATE_KEY.sign(
+        signature = key.sign(
             data,
             padding.PSS(
                 mgf = padding.MGF1(hashes.SHA256()),
@@ -180,6 +183,71 @@ def hash_stuff(cipher_suite,data):
         digest.update(data)
         return digest.finalize()
 
+def user_authentication(cipher_suite):
+
+    # mac
+    lib = '/usr/local/lib/libpteidpkcs11.dylib'
+
+    #linux
+    #lib = '/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so'
+
+    pkcs11 = PyKCS11.PyKCS11Lib()
+    pkcs11.load(lib)
+    slots = pkcs11.getSlotList()
+
+    session = pkcs11.openSession(slots[0])
+
+    all_attr = list(PyKCS11.CKA.keys())
+    all_attr = [e for e in all_attr if isinstance(e, int)]
+
+    private_key = session.findObjects([
+        (PyKCS11.CKA_CLASS, PyKCS11.CKO_PRIVATE_KEY),
+        (PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION KEY')
+    ])[0]
+    
+    auth_sub_ca = session.findObjects([
+        (PyKCS11.CKA_LABEL, 'AUTHENTICATION SUB CA')
+    ])[0]
+
+    attr = session.getAttributeValue(auth_sub_ca, all_attr)
+    attr = dict(zip(map(PyKCS11.CKA.get, all_attr), attr))
+
+    #print(x509.load_der_x509_certificate(bytes(attr['CKA_VALUE'])))
+    auth_sub_ca_certificate = bytes(attr['CKA_VALUE']).decode("latin")
+
+    root_ca = session.findObjects([
+        (PyKCS11.CKA_LABEL, 'ROOT CA')
+    ])[0]
+
+    attr = session.getAttributeValue(root_ca, all_attr)
+    attr = dict(zip(map(PyKCS11.CKA.get, all_attr), attr))
+
+    #print(x509.load_der_x509_certificate(bytes(attr['CKA_VALUE'])))
+    root_ca_certificate = bytes(attr['CKA_VALUE']).decode("latin")
+
+    citizen_auth = session.findObjects([
+        (PyKCS11.CKA_LABEL, 'CITIZEN AUTHENTICATION CERTIFICATE')
+    ])[0]
+
+    attr = session.getAttributeValue(citizen_auth, all_attr)
+    attr = dict(zip(map(PyKCS11.CKA.get, all_attr), attr))
+
+    #print(x509.load_der_x509_certificate(bytes(attr['CKA_VALUE'])))
+    loaded_citizen_auth_certificate = x509.load_der_x509_certificate(bytes(attr['CKA_VALUE']))
+    citizen_auth_certificate = bytes(attr['CKA_VALUE']).decode("latin")
+
+    mechanism = PyKCS11.Mechanism(PyKCS11.CKM_SHA1_RSA_PKCS, None)
+
+    signature = bytes(
+        session.sign(
+            private_key, 
+            loaded_citizen_auth_certificate.subject.get_attributes_for_oid(NameOID.SERIAL_NUMBER)[0].value.encode(), 
+            mechanism
+        )
+    )
+
+    return [citizen_auth_certificate, auth_sub_ca_certificate, root_ca_certificate], signature
+
 def main():
     print("|--------------------------------------|")
     print("|         SECURE MEDIA CLIENT          |")
@@ -266,6 +334,25 @@ def main():
     list_data=  req['data'].encode('latin')
 
     message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CYPHER_SUITE,list_data)
+
+
+
+
+    # send user authentication
+    chain, signature = user_authentication(CHOSEN_CYPHER_SUITE)
+
+    authorization_data = json.dumps({'url': 'api/auth','signature': signature.decode("latin"), 'certificate': chain})
+    
+    e = encrypt_comunication(CHOSEN_CYPHER_SUITE, authorization_data.encode("latin"))
+
+    req = s.post(f'{SERVER_URL}/', data = {'data': e})
+
+
+
+
+
+
+
     
     media_list = json.loads(message.decode('latin'))
     """
