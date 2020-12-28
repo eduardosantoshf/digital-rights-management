@@ -108,8 +108,10 @@ def encrypt_comunication(cypher_suite, data):
 def decrypt_comunication(s_w_k, s_w_m_k,cipher_suite, data):
     if "AES256" in cipher_suite:
         iv_size = 16
+        s_w_k=s_w_k[:32]
     elif "AES256-GCM" in cipher_suite:
         iv_size = 12
+        s_w_k=s_w_k[:32]
 
     if "SHA384" in cipher_suite:
         iv = data[:iv_size]
@@ -158,7 +160,7 @@ def unpadding_data(data,nbits):
     return unpadded_data
 
 def generate_hmac(key, cypher_suite, data):
-    print("data",data)
+    #print("data",data)
     if "SHA256" in cypher_suite:
         h = hmac.HMAC(key, hashes.SHA256())
         h.update(data)
@@ -168,6 +170,15 @@ def generate_hmac(key, cypher_suite, data):
         h.update(data)
 
     return h.finalize()
+
+def hash_stuff(cipher_suite,data):
+        if "SHA256" in cipher_suite:
+            digest = hashes.Hash(hashes.SHA256())
+        
+        elif "SHA384" in cipher_suite:
+            digest = hashes.Hash(hashes.SHA384())
+        digest.update(data)
+        return digest.finalize()
 
 def main():
     print("|--------------------------------------|")
@@ -248,13 +259,22 @@ def main():
 
     print(message)
     
+    e= encrypt_comunication(CHOSEN_CYPHER_SUITE, b"api/list")
+    req = s.get(f'{SERVER_URL}/', params={'data':e})
+    
+    req = req.json()
+    list_data=  req['data'].encode('latin')
 
+    message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CYPHER_SUITE,list_data)
+    
+    media_list = json.loads(message.decode('latin'))
+    """
     req = requests.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:
         print("Got Server List")
 
     media_list = req.json()
-
+    """
 
 
     # Present a simple selection menu    
@@ -290,12 +310,24 @@ def main():
 
     # Get data from server and send it to the ffplay stdin through a pipe
     for chunk in range(media_item['chunks'] + 1):
-        req = requests.get(f'{SERVER_URL}/api/download?id={media_item["id"]}&chunk={chunk}')
-        chunk = req.json()
-       
+        uri= f'api/download?id={media_item["id"]}&chunk={chunk}'
+        e= encrypt_comunication(CHOSEN_CYPHER_SUITE, uri.encode())
+        req = s.get(f'{SERVER_URL}/', params={'data':e})
+
+        chunk_data = req.json()
+        chunk_data=  chunk_data['data'].encode('latin')
+
+        # 1-hash chunk id
+        hash_chunk = hash_stuff(CHOSEN_CYPHER_SUITE,chunk.to_bytes(2,'big'))
+
+        #hash server_write_key + 1
+        final_hash = hash_stuff(CHOSEN_CYPHER_SUITE,SERVER_WRITE_KEY+hash_chunk)
+
+        chunk_data = json.loads(decrypt_comunication(final_hash,SERVER_WRITE_MAC_KEY,CHOSEN_CYPHER_SUITE,chunk_data).decode('latin'))
+        print(chunk_data)
         # TODO: Process chunk
 
-        data = binascii.a2b_base64(chunk['data'].encode('latin'))
+        data = binascii.a2b_base64(chunk_data['data'].encode('latin'))
         try:
             proc.stdin.write(data)
         except:

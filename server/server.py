@@ -7,6 +7,7 @@ import binascii
 import json
 import os
 import math
+from urllib import parse
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization, hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -70,25 +71,24 @@ class MediaServer(resource.Resource):
                 })
 
         # Return list to client
-        request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-        return json.dumps(media_list, indent=4).encode('latin')
+        media_json= json.dumps(media_list).replace(" ","")
+        data =self.encrypt_comunication(media_json.encode("latin"), request.getSession())
+        return json.dumps({'data':data.decode("latin")}).encode('latin')
 
 
     # Send a media chunk to the client
-    def do_download(self, request):
-        logger.debug(f'Download: args: {request.args}')
+    def do_download(self, args, session):
+        logger.debug(f'Download: args: {args}')
         
-        media_id = request.args.get(b'id', [None])[0]
-        logger.debug(f'Download: id: {media_id}')
-
         # Check if the media_id is not None as it is required
-        if media_id is None:
+        if 'id' not in args:
             request.setResponseCode(400)
             request.responseHeaders.addRawHeader(b"content-type", b"application/json")
             return json.dumps({'error': 'invalid media id'}).encode('latin')
         
-        # Convert bytes to str
-        media_id = media_id.decode('latin')
+        media_id = args['id']
+        logger.debug(f'Download: id: {media_id}')
+
 
         # Search media_id in the catalog
         if media_id not in CATALOG:
@@ -100,14 +100,15 @@ class MediaServer(resource.Resource):
         media_item = CATALOG[media_id]
 
         # Check if a chunk is valid
-        chunk_id = request.args.get(b'chunk', [b'0'])[0]
         valid_chunk = False
-        try:
-            chunk_id = int(chunk_id.decode('latin'))
-            if chunk_id >= 0 and chunk_id  < math.ceil(media_item['file_size'] / CHUNK_SIZE):
-                valid_chunk = True
-        except:
-            logger.warn("Chunk format is invalid")
+        if 'chunk' in args:
+            chunk_id=args['chunk']
+            try:
+                chunk_id = int(chunk_id)
+                if chunk_id >= 0 and chunk_id  < math.ceil(media_item['file_size'] / CHUNK_SIZE):
+                    valid_chunk = True
+            except:
+                logger.warn("Chunk format is invalid")
 
         if not valid_chunk:
             request.setResponseCode(400)
@@ -123,8 +124,17 @@ class MediaServer(resource.Resource):
             f.seek(offset)
             data = f.read(CHUNK_SIZE)
 
-            request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps(
+
+            cipher_suite=SESSIONS[session]['cypher_suite']
+            s_w_k = SESSIONS[session]['server_write_key']
+
+            # 1-hash chunk id
+            hash_chunk = self.hash(cipher_suite,chunk_id.to_bytes(2,'big'))
+
+            #hash server_write_key + 1
+            final_hash = self.hash(cipher_suite,s_w_k+hash_chunk)
+
+            data = json.dumps(
                     {
                         'media_id': media_id, 
                         'chunk': chunk_id, 
@@ -132,8 +142,10 @@ class MediaServer(resource.Resource):
                     },indent=4
                 ).encode('latin')
 
-        # File was not open?
-        request.responseHeaders.addRawHeader(b"content-type", b"application/json")
+            data= self.encrypt_comunication(data,session,key=final_hash)
+            print(data)
+            return json.dumps({'data':data.decode("latin")}).encode('latin')
+
         return json.dumps({'error': 'unknown'}, indent=4).encode('latin')
 
     def do_post_protocols(self, request):
@@ -189,19 +201,20 @@ class MediaServer(resource.Resource):
             elif request.path == b'/api/key':
                 return self.do_key(request)
             #elif request.uri == 'api/auth':
-
-            elif request.path == b'/api/list':
-                return self.do_list(request)
-
-            elif request.path == b'/api/download':
-                return self.do_download(request)
             else:
                 path =self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
                 if path == b'api/finished':
                     SESSIONS[request.getSession()]['finished']= True
                     s=self.encrypt_comunication(b'finished',request.getSession() )
-                    print(s)
                     return json.dumps({'data':s.decode("latin")}).encode('latin')
+                elif path == b'api/list':
+                    return self.do_list(request)
+                elif b'api/download' in path:
+                    url = 'http://127.0.0.1:8080/'+path.decode()
+                    args=dict(parse.parse_qsl(parse.urlsplit(url).query))
+                    return self.do_download(args,request.getSession())
+
+
                 #request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 #return b'Methods: /api/protocols /api/list /api/download'
 
@@ -240,6 +253,7 @@ class MediaServer(resource.Resource):
             return b''
 
     def generate_DH_parameter(self,session):
+        
         parameters = dh.generate_parameters(generator = 2, key_size = 2048)
 
         # generate server's private and public keys
@@ -256,15 +270,19 @@ class MediaServer(resource.Resource):
         SESSIONS[session]['DH_private_key']= private_key
         return y, p, g
 
-    def encrypt_comunication(self,data,session):
+    def encrypt_comunication(self,data,session,key=None):
+        if not key:
+            server_write_key = SESSIONS[session]['server_write_key']
+        else:
+            server_write_key= key
         cipher_suite = SESSIONS[session]['cypher_suite']
-        server_write_key = SESSIONS[session]['server_write_key']
+        
         server_write_MAC_key = SESSIONS[session]['server_write_MAC_key']
 
         if "AES256" in cipher_suite:
             iv = os.urandom(16)
             cipher = Cipher(
-                algorithms.AES(server_write_key),
+                algorithms.AES(server_write_key[:32]),
                 modes.CBC(iv)
             )
         elif "AES256-GCM" in cipher_suite:
@@ -338,7 +356,7 @@ class MediaServer(resource.Resource):
         return decrypted_data
 
     def generate_hmac(self, key, cypher_suite, data):
-        print("data",data)
+        #print("data",data)
         if "SHA256" in cypher_suite:
             h = hmac.HMAC(key, hashes.SHA256())
             h.update(data)
@@ -349,6 +367,14 @@ class MediaServer(resource.Resource):
 
         return h.finalize()
 
+    def hash(self,cipher_suite,data):
+        if "SHA256" in cipher_suite:
+            digest = hashes.Hash(hashes.SHA256())
+        
+        elif "SHA384" in cipher_suite:
+            digest = hashes.Hash(hashes.SHA384())
+        digest.update(data)
+        return digest.finalize()
 
     
     def make_signature(self, cypher_suite, data):
