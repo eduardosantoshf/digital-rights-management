@@ -350,9 +350,6 @@ def main():
 
 
 
-
-
-
     
     media_list = json.loads(message.decode('latin'))
     """

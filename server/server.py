@@ -252,7 +252,10 @@ class MediaServer(resource.Resource):
 
                 if path == 'api/auth':
                     
-                    print(data['certificate'])
+                    #print(data['certificate'])
+
+                    user_certificate = x509.load_der_x509_certificate(data['certificate'][0].encode("latin"))
+                    print(user_certificate)
 
 
                     #s = self.encrypt_comunication(b'finished',request.getSession() )
