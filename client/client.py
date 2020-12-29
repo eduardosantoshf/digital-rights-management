@@ -31,10 +31,10 @@ with open("../private_keys_and_certificates/client_private_key.pem", "rb") as ke
 
 SERVER_URL = 'http://127.0.0.1:8080'
 SERVER_PUBLIC_KEY = None
-global CLIENT_WRITE_MAC_KEY
-global CLIENT_WRITE_KEY
-global SERVER_WRITE_MAC_KEY
-global SERVER_WRITE_KEY
+CLIENT_WRITE_MAC_KEY = None
+CLIENT_WRITE_KEY = None
+SERVER_WRITE_MAC_KEY = None
+SERVER_WRITE_KEY = None
 
 CLIENT_CERTIFICATE = open("../private_keys_and_certificates/client_certificate.pem",'rb').read().decode()
 
@@ -172,7 +172,6 @@ def unpadding_data(data,nbits):
     return unpadded_data
 
 def generate_hmac(key, cipher_suite, data):
-    #print("data",data)
     if "SHA256" in cipher_suite:
         h = hmac.HMAC(key, hashes.SHA256())
         h.update(data)
@@ -189,13 +188,16 @@ def hash_stuff(cipher_suite,data):
         
         elif "SHA384" in cipher_suite:
             digest = hashes.Hash(hashes.SHA384())
+
         digest.update(data)
+
         return digest.finalize()
 
 def verify_signature(signature, cipher_suite, key, data):
     if "SHA256" in cipher_suite:
         hash_type = hashes.SHA256()
         hash_type2 = hashes.SHA256()
+
     elif "SHA384" in cipher_suite:
         hash_type = hashes.SHA384()
         hash_type2 = hashes.SHA384()
@@ -326,16 +328,13 @@ def main():
 
     shared_key = private_key.exchange(peer_public_key)
 
-    CLIENT_WRITE_MAC_KEY = None
-    CLIENT_WRITE_KEY = None
-    SERVER_WRITE_MAC_KEY = None
-    SERVER_WRITE_KEY = None
+    global CLIENT_WRITE_MAC_KEY
+    global CLIENT_WRITE_KEY
+    global SERVER_WRITE_MAC_KEY
+    global SERVER_WRITE_KEY
 
     CLIENT_WRITE_MAC_KEY, SERVER_WRITE_MAC_KEY, CLIENT_WRITE_KEY, SERVER_WRITE_KEY = getSessionkeys(CHOSEN_CIPHER_SUITE, shared_key,client_random,server_random)
     
-    #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
-
-    #print("server's public key:  ", peer_public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
     e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/finished", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
     req = s.get(f'{SERVER_URL}/', params={'data':e})
     req= req.json()

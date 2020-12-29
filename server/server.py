@@ -13,23 +13,22 @@ from datetime import datetime
 from cryptography import x509
 from cryptography.x509.oid import NameOID,ExtensionOID
 from cryptography.hazmat.primitives import serialization, hashes, hmac
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding, dh
 from cryptography.hazmat.primitives import padding as real_padding
-from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 with open("../private_keys_and_certificates/server_private_key.pem", "rb") as key_file:
-    SERVER_PRIVATE_KEY  = serialization.load_pem_private_key(
+    SERVER_PRIVATE_KEY = serialization.load_pem_private_key(
         key_file.read(),
-        password=None,
+        password = None,
     )
 
 with open("../private_keys_and_certificates/distributor_private_key.pem", "rb") as key_file:
-    DISTRIBUTOR_PRIVATE_KEY  = serialization.load_pem_private_key(
+    DISTRIBUTOR_PRIVATE_KEY = serialization.load_pem_private_key(
         key_file.read(),
-        password=None,
+        password = None,
     )
 
 logger = logging.getLogger('root')
@@ -66,19 +65,22 @@ class MediaServer(resource.Resource):
         #    request.setResponseCode(401)
         #    return 'Not authorized'
         session = request.getSession()
+
         if not 'user_id' in SESSIONS[session]:
             request.setResponseCode(401)
-            s=self.encrypt_comunication(b'Not authorized',request.getSession())
+            s = self.encrypt_comunication(b'Not authorized',request.getSession())
+
             return json.dumps({'data':s.decode("latin")}).encode('latin')
 
         cipher_suite = SESSIONS[session]['cipher_suite']
+
         # Build list
         media_list = []
         for media_id in CATALOG:
             media = CATALOG[media_id]
 
-            media_data= media_id+media['name']+media['description']+str(math.ceil(media['file_size'] / CHUNK_SIZE))+str(media['duration'])
-            dist_signature= self.make_signature(cipher_suite,media_data.encode("latin"),key=DISTRIBUTOR_PRIVATE_KEY)
+            media_data = media_id + media['name'] + media['description'] + str(math.ceil(media['file_size'] / CHUNK_SIZE)) + str(media['duration'])
+            dist_signature = self.make_signature(cipher_suite,media_data.encode("latin"), key = DISTRIBUTOR_PRIVATE_KEY)
 
             media_list.append(
                 {
@@ -100,6 +102,7 @@ class MediaServer(resource.Resource):
         #TODO get license list
         media_json= json.dumps({'media_list':media_list,'licence_list':'lista'})
         data =self.encrypt_comunication(media_json.encode("latin"), request.getSession())
+
         return json.dumps({'data':data.decode("latin")}).encode('latin')
 
 
@@ -149,10 +152,10 @@ class MediaServer(resource.Resource):
         # Open file, seek to correct position and return the chunk
         with open(os.path.join(CATALOG_BASE, media_item['file_name']), 'rb') as f:
             f.seek(offset)
+
             data = f.read(CHUNK_SIZE)
 
-
-            cipher_suite=SESSIONS[session]['cipher_suite']
+            cipher_suite = SESSIONS[session]['cipher_suite']
             s_w_k = SESSIONS[session]['server_write_key']
 
             # 1-hash chunk id
@@ -169,7 +172,7 @@ class MediaServer(resource.Resource):
                     },indent=4
                 ).encode('latin')
 
-            data= self.encrypt_comunication(data,session,key=final_hash)
+            data = self.encrypt_comunication(data,session,key=final_hash)
             print(data)
             return json.dumps({'data':data.decode("latin")}).encode('latin')
 
@@ -178,20 +181,25 @@ class MediaServer(resource.Resource):
     def do_post_protocols(self, request):
         session = request.getSession()       
         client_cipher_suites = request.args.get(b'cipher_suite')
+
         chosen_cipher_suite = None
 
+        # choose cipher suite 
         for csuite in client_cipher_suites:
             csuite = csuite.decode()
             if csuite in SERVER_CIPHER_SUITES:
                 chosen_cipher_suite = csuite
                 break
 
+        
+        # load server's certificate
         cert = open("../private_keys_and_certificates/server_certificate.pem",'rb').read().decode()
 
         # server and client's randoms
         server_random = os.urandom(28)
         client_random = request.args[b'client_random'][0]
 
+        # save session data
         SESSIONS[session] = {'cipher_suite':chosen_cipher_suite, 'client_random':client_random, 'server_random':server_random}
 
         # generate DH parameters: y, p (large prime), g (primitive root mod p)
@@ -206,16 +214,16 @@ class MediaServer(resource.Resource):
         session = request.getSession()
 
         cipher_suite = SESSIONS[session]['cipher_suite']
-        print(request.args[b'certificate'][0])
+        #print(request.args[b'certificate'][0])
 
         cert = x509.load_pem_x509_certificate(request.args[b'certificate'][0])
-        print(cert.not_valid_before)
+        #print(cert.not_valid_before)
 
         DH_key = self.get_DH_Key(session,int(request.args[b'DH_PARAMETER'][0].decode()),cipher_suite)
         CLIENT_PUBLIC_KEY = cert.public_key()
 
         self.verify_signature(request.args[b'signature'][0], cipher_suite,CLIENT_PUBLIC_KEY, SESSIONS[session]['client_random']+ SESSIONS[session]['server_random'] + request.args[b'DH_PARAMETER'][0])
-        self.getSessionkeys(session,cipher_suite,DH_key)
+        self.get_session_keys(session,cipher_suite,DH_key)
         
 
     # Handle a GET request
@@ -225,20 +233,30 @@ class MediaServer(resource.Resource):
         try:
             if request.path == b'/api/protocols':
                 return self.do_post_protocols(request)
+
             elif request.path == b'/api/key':
                 return self.do_key(request)
+
             #elif request.uri == 'api/auth':
+
             else:
                 path =self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
+
                 if path == b'api/finished':
                     SESSIONS[request.getSession()]['finished']= True
-                    s=self.encrypt_comunication(b'finished',request.getSession() )
+
+                    s = self.encrypt_comunication(b'finished',request.getSession() )
+
                     return json.dumps({'data':s.decode("latin")}).encode('latin')
+
                 elif path == b'api/list':
                     return self.do_list(request)
+
                 elif b'api/download' in path:
                     url = 'http://127.0.0.1:8080/'+path.decode()
-                    args=dict(parse.parse_qsl(parse.urlsplit(url).query))
+
+                    args = dict(parse.parse_qsl(parse.urlsplit(url).query))
+
                     return self.do_download(args,request.getSession())
 
 
@@ -270,8 +288,9 @@ class MediaServer(resource.Resource):
 
             elif request.path == b'/api/download':
                 return self.do_download(request)
+
             else:
-                session=request.getSession()
+                session = request.getSession()
                 data = self.decrypt_comunication(session, request.args[b'data'][0])
 
                 data = json.loads(data.decode("latin"))
@@ -282,22 +301,29 @@ class MediaServer(resource.Resource):
                     
                     #print(data['certificate'])
                     user_certificate = x509.load_der_x509_certificate(data['certificate'][0].encode("latin"))
-                    uid= user_certificate.subject.get_attributes_for_oid(NameOID.SERIAL_NUMBER)[0].value
+                    uid = user_certificate.subject.get_attributes_for_oid(NameOID.SERIAL_NUMBER)[0].value
                     #print(user_certificate)
                     try:
-                        self.user_verify_signature(data['signature'].encode("latin"),user_certificate.public_key(),uid.encode())
+                        self.user_verify_signature(data['signature'].encode("latin"), user_certificate.public_key(), uid.encode())
+
                         if  self.check_user_cert_chain(data['certificate']):
+
                             print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
                             SESSIONS[session]['user_id']=uid
-                            message= "user_ " + uid + "authenticated"
-                            s= self.encrypt_comunication(message.encode("latin"), session)
+                            message = "user_ " + uid + "authenticated"
+
+                            s = self.encrypt_comunication(message.encode("latin"), session)
+
                             return json.dumps({'data':s.decode("latin")}).encode('latin')
                         
                         else:
-                            s= self.encrypt_comunication(b'failed to authenticate user', session)
+                            s = self.encrypt_comunication(b'failed to authenticate user', session)
+
                             return json.dumps({'data':s.decode("latin")}).encode('latin')
+
                     except:
-                        s= self.encrypt_comunication(b'failed to authenticate user', session)
+                        s = self.encrypt_comunication(b'failed to authenticate user', session)
+
                         return json.dumps({'data':s.decode("latin")}).encode('latin')
                     #s = self.encrypt_comunication(b'finished',request.getSession() )
                     #return json.dumps({'data':s.decode("latin")}).encode('latin')
@@ -312,6 +338,8 @@ class MediaServer(resource.Resource):
             request.responseHeaders.addRawHeader(b"content-type", b"text/plain")
             return b''
 
+    #------------------ check user certificate chain ------------------#
+
     def check_user_cert_chain(self,cert_chain):
         """
         if not self.validate_attributes(cert_chain):
@@ -322,6 +350,7 @@ class MediaServer(resource.Resource):
 
         if not self.check_cert_signature(cert_chain): 
             return False 
+
         return True 
 
     """
@@ -338,26 +367,37 @@ class MediaServer(resource.Resource):
         KEY_USAGE: key_cert_sign=True, crl_sign=True
 
     """
+
+    #------------------------------------------------------------------#
+
+
+    #---------------------- validate attributes -----------------------#
+
     def validate_attributes(self,cert_chain):
-        #CITIZEN AUTHENTICATION CERTIFICATE
-        c=x509.load_der_x509_certificate(cert_chain[0].encode("latin"))
-        key_usage=c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+        # CITIZEN AUTHENTICATION CERTIFICATE
+        c = x509.load_der_x509_certificate(cert_chain[0].encode("latin"))
+        key_usage = c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+
         if (not key_usage.digital_signature or key_usage.content_commitment or key_usage.key_encipherment 
             or key_usage.data_encipherment or not key_usage.key_agreement or key_usage.key_cert_sign  
             or key_usage.crl_sign or key_usage.encipher_only or key_usage.decipher_only):
+            
             return False
 
-        elif not (c.not_valid_before< datetime.now()< c.not_valid_after):
+        elif not (c.not_valid_before < datetime.now() < c.not_valid_after):
             return False
         
-        elif not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME).value=='Cartão de Cidadão'):
+        elif not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME).value == 'Cartão de Cidadão'):
             return False
 
-        c=x509.load_der_x509_certificate(cert_chain[1].encode("latin"))
-        key_usage=c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
-        if ( key_usage.digital_signature or key_usage.content_commitment or key_usage.key_encipherment 
+        # AUTHENTICATION SUB CA
+        c = x509.load_der_x509_certificate(cert_chain[1].encode("latin"))
+        key_usage = c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+
+        if (key_usage.digital_signature or key_usage.content_commitment or key_usage.key_encipherment 
             or key_usage.data_encipherment or key_usage.key_agreement or not key_usage.key_cert_sign  
             or not  key_usage.crl_sign or key_usage.encipher_only or key_usage.decipher_only):
+
             return False
         """
         elif not (c.not_valid_before< datetime.now()< c.not_valid_after):
@@ -384,12 +424,19 @@ class MediaServer(resource.Resource):
         """
         return True
 
+    #------------------------------------------------------------------#
+
+
+    #----------------- check certification signature ------------------#
+
     def check_cert_signature(self,cert_chain):
-        for cert in range(len(cert_chain)-1):
+        for cert in range(len(cert_chain) - 1):
 
             c = x509.load_der_x509_certificate(cert_chain[cert].encode("latin"))
-            ci = x509.load_der_x509_certificate(cert_chain[cert+1].encode("latin"))
+            ci = x509.load_der_x509_certificate(cert_chain[cert + 1].encode("latin"))
+
             issuer_public_key = ci.public_key()
+
             try:
                 issuer_public_key.verify(
                     c.signature,
@@ -397,51 +444,72 @@ class MediaServer(resource.Resource):
                     padding.PKCS1v15(),
                     c.signature_hash_algorithm,
                 )
-            except:
-                return False
+            except: return False
+
         return True
 
+    #------------------------------------------------------------------#
+
+
+    #------------------------- validate crl --------------------------#
+
     def validate_crl(self,cert_chain):
-        for cert in range(len(cert_chain)-1):
+        for cert in range(len(cert_chain) - 1):
             c = x509.load_der_x509_certificate(cert_chain[cert].encode("latin"))
-            #print(c.extensions.get_extension_for_oid(ExtensionOID.FRESHEST_CRL).value[0].full_name)
-            #print(c.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS).value[0].full_name)
-            r= requests.get(c.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS).value[0].full_name[0].value, allow_redirects=True)
-            crl= x509.load_der_x509_crl(r.content)
+
+            r = requests.get(c.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS).value[0].full_name[0].value, allow_redirects = True)
+
+            crl = x509.load_der_x509_crl(r.content)
+
             if not crl.get_revoked_certificate_by_serial_number(c.serial_number) is  None:
                 return False
+
             try:
-                r= requests.get(c.extensions.get_extension_for_oid(ExtensionOID.FRESHEST_CRL).value[0].full_name[0].value, allow_redirects=True)
-                crl= x509.load_der_x509_crl(r.content)
+                r = requests.get(c.extensions.get_extension_for_oid(ExtensionOID.FRESHEST_CRL).value[0].full_name[0].value, allow_redirects = True)
+                crl = x509.load_der_x509_crl(r.content)
+
                 if not crl.get_revoked_certificate_by_serial_number(c.serial_number) is None:
                     return False
             except:
                 logger.warning("no crl delta")
+
         return True
+
+    #------------------------------------------------------------------#
+
+
+    #--------------------- generate DH parameter ----------------------#
     
-    def generate_DH_parameter(self,session):
+    def generate_DH_parameter(self, session):
         
         parameters = dh.generate_parameters(generator = 2, key_size = 2048)
 
         # generate server's private and public keys
         private_key = parameters.generate_private_key()
-        
         public_key = private_key.public_key()
 
+        # get y, p and g parameters
         y = public_key.public_numbers().y
-
         p = parameters.parameter_numbers().p
         g = parameters.parameter_numbers().g
 
-        SESSIONS[session]['parameters']=dh.DHParameterNumbers(p, g)
-        SESSIONS[session]['DH_private_key']= private_key
+        SESSIONS[session]['parameters'] = dh.DHParameterNumbers(p, g)
+        SESSIONS[session]['DH_private_key'] = private_key
+
         return y, p, g
 
-    def encrypt_comunication(self,data,session,key=None):
+    #------------------------------------------------------------------#
+
+
+    #--------------------- encrypt comunication -----------------------#
+
+    def encrypt_comunication(self, data, session, key = None):
         if not key:
             server_write_key = SESSIONS[session]['server_write_key']
+
         else:
-            server_write_key= key
+            server_write_key = key
+
         cipher_suite = SESSIONS[session]['cipher_suite']
         
         server_write_MAC_key = SESSIONS[session]['server_write_MAC_key']
@@ -464,15 +532,22 @@ class MediaServer(resource.Resource):
 
         encrypted_data = encryptor.update(self.padding_data(data, 128)) + encryptor.finalize()
 
-        return iv + self.generate_hmac(server_write_MAC_key, cipher_suite,   iv +encrypted_data) + encrypted_data
+        return iv + self.generate_hmac(server_write_MAC_key, cipher_suite, iv +encrypted_data) + encrypted_data
+
+    #------------------------------------------------------------------#
+
+
+    #--------------------- decrypt comunication -----------------------#
 
     def decrypt_comunication(self, session, data):
         cipher_suite = SESSIONS[session]['cipher_suite']
         client_write_key = SESSIONS[session]['client_write_key']
         client_write_MAC_key = SESSIONS[session]['client_write_MAC_key']
 
+        # get iv size
         if "AES256" in cipher_suite:
             iv_size = 16
+            
         elif "AES256-GCM" in cipher_suite:
             iv_size = 12
 
@@ -489,28 +564,44 @@ class MediaServer(resource.Resource):
             m_data =data[iv_size + 32:]
 
         if hmac == self.generate_hmac(client_write_MAC_key, cipher_suite, h_data):
+
             m_data = self.decrypt_symetric(client_write_key,iv,cipher_suite,m_data)
             unpadded_data = self.unpadding_data(m_data,128)
+
             return unpadded_data
 
-        else:
-            return 0
+        else: return 0
 
-    def padding_data(self,data, bits):
+    #------------------------------------------------------------------#
+
+
+    #------------------------- padding data ---------------------------#
+
+    def padding_data(self, data, bits):
         padder = real_padding.PKCS7(bits).padder()
         padded_data = padder.update(data)
         padded_data += padder.finalize()
 
         return padded_data
 
-    def unpadding_data(self,data,nbits):
+    #------------------------------------------------------------------#
+
+
+    #------------------------ unpadding data --------------------------#
+
+    def unpadding_data(self, data, nbits):
         unpadder = real_padding.PKCS7(nbits).unpadder()
         unpadded_data = unpadder.update(data)
         unpadded_data += unpadder.finalize()
 
         return unpadded_data
 
-    def decrypt_symetric(self,key,iv,cipher_suite,data):
+    #------------------------------------------------------------------#
+
+
+    #--------------------- symetric decryption ------------------------#
+
+    def decrypt_symetric(self, key, iv, cipher_suite, data):
         if "AES256" in cipher_suite:
             cipher = Cipher(
                 algorithms.AES(key),
@@ -522,8 +613,12 @@ class MediaServer(resource.Resource):
 
         return decrypted_data
 
+    #------------------------------------------------------------------#
+
+
+    #------------------- generate hmac from data ----------------------#
+
     def generate_hmac(self, key, cipher_suite, data):
-        #print("data",data)
         if "SHA256" in cipher_suite:
             h = hmac.HMAC(key, hashes.SHA256())
             h.update(data)
@@ -534,17 +629,28 @@ class MediaServer(resource.Resource):
 
         return h.finalize()
 
-    def hash(self,cipher_suite,data):
+    #------------------------------------------------------------------#
+
+
+    #-------------------------- hash data -----------------------------#
+
+    def hash(self, cipher_suite, data):
         if "SHA256" in cipher_suite:
             digest = hashes.Hash(hashes.SHA256())
         
         elif "SHA384" in cipher_suite:
             digest = hashes.Hash(hashes.SHA384())
+
         digest.update(data)
+
         return digest.finalize()
 
+    #------------------------------------------------------------------#
+
+
+    #----------------------- make signature ---------------------------#
     
-    def make_signature(self, cipher_suite, data, key=SERVER_PRIVATE_KEY):
+    def make_signature(self, cipher_suite, data, key = SERVER_PRIVATE_KEY):
         if "SHA384" in cipher_suite:
             signature = SERVER_PRIVATE_KEY.sign(
                 data,
@@ -567,7 +673,12 @@ class MediaServer(resource.Resource):
         
         return signature
 
-    def user_verify_signature(self,signature,pub_key,data):
+    #------------------------------------------------------------------#
+
+
+    #-------------------- verify user signature -----------------------#
+
+    def user_verify_signature(self, signature, pub_key, data):
         pub_key.verify(
             signature,
             data,
@@ -575,7 +686,12 @@ class MediaServer(resource.Resource):
             hashes.SHA1()
         )
 
-    def verify_signature(self,signature,cipher_suite,pub_key,data):
+    #------------------------------------------------------------------#
+
+
+    #----------------------- verify signature -------------------------#
+
+    def verify_signature(self, signature, cipher_suite, pub_key, data):
         if "SHA384" in cipher_suite:
             hash_type = hashes.SHA384()
             hash_type2 = hashes.SHA384()
@@ -594,16 +710,29 @@ class MediaServer(resource.Resource):
             hash_type2
         )
 
-    def get_DH_Key(self, session,y,cipher_suite):
+    #------------------------------------------------------------------#
+
+
+    #-------------------------- get DH key ----------------------------#
+
+    def get_DH_Key(self, session, y, cipher_suite):
         peer_public_numbers = dh.DHPublicNumbers(y, SESSIONS[session]['parameters'])
         peer_public_key = peer_public_numbers.public_key()
+
         shared_key = SESSIONS[session]['DH_private_key'].exchange(peer_public_key)
+
         return shared_key
 
-    def getSessionkeys(self,session,cipher_suite, dh_key):
+    #------------------------------------------------------------------#
+
+
+    #----------------------- get session keys -------------------------#
+
+    def get_session_keys(self, session, cipher_suite, dh_key):
         if "SHA384" in cipher_suite:
             hash_type = hashes.SHA384()
             size = 48
+
         elif "SHA256" in cipher_suite:
             hash_type = hashes.SHA256()
             size = 32
@@ -623,7 +752,7 @@ class MediaServer(resource.Resource):
             SESSIONS[session]['client_write_key']=key[size*2:size*2+32]
             SESSIONS[session]['server_write_key']=key[size*2+32:size*2+64]
 
-            #print(SESSIONS[session])
+    #------------------------------------------------------------------#
 
 
 print("Server started")
