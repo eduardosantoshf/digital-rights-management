@@ -94,6 +94,8 @@ class MediaServer(resource.Resource):
 
                 })
 
+            print(media_data.encode("latin"))
+
         # Return list to client
         #TODO get license list
         media_json= json.dumps({'media_list':media_list,'licence_list':'lista'})
