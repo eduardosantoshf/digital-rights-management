@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-with open("MediaServerkey.pem", "rb") as key_file:
+with open("../private_keys_and_certificates/server_private_key.pem", "rb") as key_file:
     SERVER_PRIVATE_KEY  = serialization.load_pem_private_key(
         key_file.read(),
         password=None,
@@ -159,7 +159,7 @@ class MediaServer(resource.Resource):
                 chosen_cypher_suite = csuite
                 break
 
-        cert = open("MediaServer.pem",'rb').read().decode()
+        cert = open("../private_keys_and_certificates/server_certificate.pem",'rb').read().decode()
 
         # server and client's randoms
         server_random = os.urandom(28)

@@ -23,7 +23,7 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.INFO)
 
-with open("client_private_key.pem", "rb") as key_file:
+with open("../private_keys_and_certificates/client_private_key.pem", "rb") as key_file:
     CLIENT_PRIVATE_KEY  = serialization.load_pem_private_key(
         key_file.read(),
         password=None,
@@ -32,7 +32,7 @@ with open("client_private_key.pem", "rb") as key_file:
 SERVER_URL = 'http://127.0.0.1:8080'
 SERVER_PUBLIC_KEY = None
 
-CLIENT_CERTIFICATE = open("client_cert.pem",'rb').read().decode()
+CLIENT_CERTIFICATE = open("../private_keys_and_certificates/client_certificate.pem",'rb').read().decode()
 
 CLIENT_CYPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 CHOSEN_CYPHER_SUITE = None
