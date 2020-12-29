@@ -34,6 +34,9 @@ SERVER_PUBLIC_KEY = None
 
 CLIENT_CERTIFICATE = open("../private_keys_and_certificates/client_certificate.pem",'rb').read().decode()
 
+# client knows the song distributor
+DISTRIBUTER_CERTIFICATE = open("../private_keys_and_certificates/distributor_certificate.pem",'rb').read().decode()
+
 CLIENT_CYPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 CHOSEN_CYPHER_SUITE = None
 
@@ -329,12 +332,11 @@ def main():
     
     e= encrypt_comunication(CHOSEN_CYPHER_SUITE, b"api/list")
     req = s.get(f'{SERVER_URL}/', params={'data':e})
-    
+    print(req.status_code)
     req = req.json()
     list_data=  req['data'].encode('latin')
-
-    message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CYPHER_SUITE,list_data)
-
+    
+    
 
 
 
@@ -348,10 +350,19 @@ def main():
     req = s.post(f'{SERVER_URL}/', data = {'data': e})
 
 
-
-
+    e= encrypt_comunication(CHOSEN_CYPHER_SUITE, b"api/list")
+    req = s.get(f'{SERVER_URL}/', params={'data':e})
+    print(req.status_code)
+    req = req.json()
+    list_data=  req['data'].encode('latin')
     
+    message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CYPHER_SUITE,list_data)
+
     media_list = json.loads(message.decode('latin'))
+
+
+    print(media_list)
+    
     """
     req = requests.get(f'{SERVER_URL}/api/list')
     if req.status_code == 200:

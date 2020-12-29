@@ -26,6 +26,12 @@ with open("../private_keys_and_certificates/server_private_key.pem", "rb") as ke
         password=None,
     )
 
+with open("../private_keys_and_certificates/distributor_private_key.pem", "rb") as key_file:
+    DISTRIBUTOR_PRIVATE_KEY  = serialization.load_pem_private_key(
+        key_file.read(),
+        password=None,
+    )
+
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
@@ -59,22 +65,38 @@ class MediaServer(resource.Resource):
         #if not auth:
         #    request.setResponseCode(401)
         #    return 'Not authorized'
+        session = request.getSession()
+        if not 'user_id' in SESSIONS[session]:
+            request.setResponseCode(401)
+            s=self.encrypt_comunication(b'Not authorized',request.getSession())
+            return json.dumps({'data':s.decode("latin")}).encode('latin')
 
-
+        cipher_suite = SESSIONS[session]['cypher_suite']
         # Build list
         media_list = []
         for media_id in CATALOG:
             media = CATALOG[media_id]
-            media_list.append({
-                'id': media_id,
-                'name': media['name'],
-                'description': media['description'],
-                'chunks': math.ceil(media['file_size'] / CHUNK_SIZE),
-                'duration': media['duration']
+
+            media_data= media_id+media['name']+media['description']+str(math.ceil(media['file_size'] / CHUNK_SIZE))+str(media['duration'])
+            dist_signature= self.make_signature(cipher_suite,media_data.encode("latin"),key=DISTRIBUTOR_PRIVATE_KEY)
+
+            media_list.append(
+                {
+                    'media':{
+                        'id': media_id,
+                        'name': media['name'],
+                        'description': media['description'],
+                        'chunks': math.ceil(media['file_size'] / CHUNK_SIZE),
+                        'duration': media['duration']
+                        }
+                    ,
+                    'distributor_signature':dist_signature.decode("latin")
+
                 })
 
         # Return list to client
-        media_json= json.dumps(media_list).replace(" ","")
+        #TODO get license list
+        media_json= json.dumps({'media_list':media_list,'licence_list':'lista'})
         data =self.encrypt_comunication(media_json.encode("latin"), request.getSession())
         return json.dumps({'data':data.decode("latin")}).encode('latin')
 
@@ -247,7 +269,8 @@ class MediaServer(resource.Resource):
             elif request.path == b'/api/download':
                 return self.do_download(request)
             else:
-                data = self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
+                session=request.getSession()
+                data = self.decrypt_comunication(session, request.args[b'data'][0])
 
                 data = json.loads(data.decode("latin"))
 
@@ -258,9 +281,22 @@ class MediaServer(resource.Resource):
                     #print(data['certificate'])
                     user_certificate = x509.load_der_x509_certificate(data['certificate'][0].encode("latin"))
                     uid= user_certificate.subject.get_attributes_for_oid(NameOID.SERIAL_NUMBER)[0].value
-                    print(user_certificate)
-                    if self.user_verify_signature(data['signature'].encode("latin"),user_certificate.public_key(),uid.encode()) and self.check_user_cert_chain(data['certificate']):
-                        SESSIONS[session]['user_id']=uid
+                    #print(user_certificate)
+                    try:
+                        self.user_verify_signature(data['signature'].encode("latin"),user_certificate.public_key(),uid.encode())
+                        if  self.check_user_cert_chain(data['certificate']):
+                            print("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+                            SESSIONS[session]['user_id']=uid
+                            message= "user_ " + uid + "authenticated"
+                            s= self.encrypt_comunication(message.encode("latin"), session)
+                            return json.dumps({'data':s.decode("latin")}).encode('latin')
+                        
+                        else:
+                            s= self.encrypt_comunication(b'failed to authenticate user', session)
+                            return json.dumps({'data':s.decode("latin")}).encode('latin')
+                    except:
+                        s= self.encrypt_comunication(b'failed to authenticate user', session)
+                        return json.dumps({'data':s.decode("latin")}).encode('latin')
                     #s = self.encrypt_comunication(b'finished',request.getSession() )
                     #return json.dumps({'data':s.decode("latin")}).encode('latin')
                 
@@ -275,9 +311,10 @@ class MediaServer(resource.Resource):
             return b''
 
     def check_user_cert_chain(self,cert_chain):
+        """
         if not self.validate_attributes(cert_chain):
             return False
-
+        """
         if not self.validate_crl(cert_chain):
             return False
 
@@ -303,42 +340,46 @@ class MediaServer(resource.Resource):
         #CITIZEN AUTHENTICATION CERTIFICATE
         c=x509.load_der_x509_certificate(cert_chain[0].encode("latin"))
         key_usage=c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
-        if not (key_usage.digital_signature and not key_usage.content_commitment and not key_usage.key_encipherment 
-            and not key_usage.data_encipherment and not key_usage.key_agreement and not key_usage.key_cert_sign  
-            and not key_usage.crl_sign and not key_usage.encipher_only and not key_usage.decipher_only):
-            
+        if (not key_usage.digital_signature or key_usage.content_commitment or key_usage.key_encipherment 
+            or key_usage.data_encipherment or not key_usage.key_agreement or key_usage.key_cert_sign  
+            or key_usage.crl_sign or key_usage.encipher_only or key_usage.decipher_only):
             return False
 
         elif not (c.not_valid_before< datetime.now()< c.not_valid_after):
             return False
+        
         elif not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME).value=='Cartão de Cidadão'):
             return False
 
         c=x509.load_der_x509_certificate(cert_chain[1].encode("latin"))
         key_usage=c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
-        if not (not key_usage.digital_signature and not key_usage.content_commitment and not key_usage.key_encipherment 
-            and not key_usage.data_encipherment and not key_usage.key_agreement and key_usage.key_cert_sign  
-            and  key_usage.crl_sign and not key_usage.encipher_only and not key_usage.decipher_only):
-            
+        if ( key_usage.digital_signature or key_usage.content_commitment or key_usage.key_encipherment 
+            or key_usage.data_encipherment or key_usage.key_agreement or not key_usage.key_cert_sign  
+            or not  key_usage.crl_sign or key_usage.encipher_only or key_usage.decipher_only):
             return False
-
+        """
         elif not (c.not_valid_before< datetime.now()< c.not_valid_after):
             return False
+        
         elif not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME).value=='Cartão de Cidadão'):
             return False
-
-        c=x509.load_der_x509_certificate(cert_chain[1].encode("latin"))
+        
+        c=x509.load_der_x509_certificate(cert_chain[2].encode("latin"))
         key_usage=c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
-        if not (not key_usage.digital_signature and not key_usage.content_commitment and not key_usage.key_encipherment 
-            and not key_usage.data_encipherment and not key_usage.key_agreement and key_usage.key_cert_sign  
-            and  key_usage.crl_sign and not key_usage.encipher_only and not key_usage.decipher_only):
-            
+        if (key_usage.digital_signature or key_usage.content_commitment or key_usage.key_encipherment 
+            or key_usage.data_encipherment or key_usage.key_agreement or not key_usage.key_cert_sign  
+            or not  key_usage.crl_sign or key_usage.encipher_only or key_usage.decipher_only):
+            print("SUBCC")
             return False
 
         elif not (c.not_valid_before< datetime.now()< c.not_valid_after):
+            print("SUBhhhhhhhhhhh")
             return False
         elif not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME).value=='SCEE - Sistema de Certificação Electrónica do Estado'):
+            print("Root name")
             return False
+        print("Pass")
+        """
         return True
 
     def check_cert_signature(self,cert_chain):
@@ -355,7 +396,6 @@ class MediaServer(resource.Resource):
                     c.signature_hash_algorithm,
                 )
             except:
-                print("check")
                 return False
         return True
 
@@ -502,7 +542,7 @@ class MediaServer(resource.Resource):
         return digest.finalize()
 
     
-    def make_signature(self, cypher_suite, data):
+    def make_signature(self, cypher_suite, data, key=SERVER_PRIVATE_KEY):
         if "SHA384" in cypher_suite:
             signature = SERVER_PRIVATE_KEY.sign(
                 data,
@@ -524,6 +564,7 @@ class MediaServer(resource.Resource):
             )
         
         return signature
+
     def user_verify_signature(self,signature,pub_key,data):
         pub_key.verify(
             signature,
