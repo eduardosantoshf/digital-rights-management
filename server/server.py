@@ -37,7 +37,7 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
 
-SERVER_CYPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
+SERVER_CIPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 
 SESSIONS={}
 
@@ -71,7 +71,7 @@ class MediaServer(resource.Resource):
             s=self.encrypt_comunication(b'Not authorized',request.getSession())
             return json.dumps({'data':s.decode("latin")}).encode('latin')
 
-        cipher_suite = SESSIONS[session]['cypher_suite']
+        cipher_suite = SESSIONS[session]['cipher_suite']
         # Build list
         media_list = []
         for media_id in CATALOG:
@@ -152,7 +152,7 @@ class MediaServer(resource.Resource):
             data = f.read(CHUNK_SIZE)
 
 
-            cipher_suite=SESSIONS[session]['cypher_suite']
+            cipher_suite=SESSIONS[session]['cipher_suite']
             s_w_k = SESSIONS[session]['server_write_key']
 
             # 1-hash chunk id
@@ -177,13 +177,13 @@ class MediaServer(resource.Resource):
 
     def do_post_protocols(self, request):
         session = request.getSession()       
-        client_cypher_suites = request.args.get(b'cypher_suite')
-        chosen_cypher_suite = None
+        client_cipher_suites = request.args.get(b'cipher_suite')
+        chosen_cipher_suite = None
 
-        for csuite in client_cypher_suites:
+        for csuite in client_cipher_suites:
             csuite = csuite.decode()
-            if csuite in SERVER_CYPHER_SUITES:
-                chosen_cypher_suite = csuite
+            if csuite in SERVER_CIPHER_SUITES:
+                chosen_cipher_suite = csuite
                 break
 
         cert = open("../private_keys_and_certificates/server_certificate.pem",'rb').read().decode()
@@ -192,30 +192,30 @@ class MediaServer(resource.Resource):
         server_random = os.urandom(28)
         client_random = request.args[b'client_random'][0]
 
-        SESSIONS[session] = {'cypher_suite':chosen_cypher_suite, 'client_random':client_random, 'server_random':server_random}
+        SESSIONS[session] = {'cipher_suite':chosen_cipher_suite, 'client_random':client_random, 'server_random':server_random}
 
         # generate DH parameters: y, p (large prime), g (primitive root mod p)
         y, p, g = self.generate_DH_parameter(session)
 
         # generate signature
-        signature = self.make_signature(chosen_cypher_suite, client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode())
+        signature = self.make_signature(chosen_cipher_suite, client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode())
 
-        return json.dumps({'cypher_suite':chosen_cypher_suite, 'certificate':cert, 'server_random':server_random.decode('latin'), 'signature':signature.decode('latin'), 'y':y, 'p':p, 'g':g}).encode('latin')
+        return json.dumps({'cipher_suite':chosen_cipher_suite, 'certificate':cert, 'server_random':server_random.decode('latin'), 'signature':signature.decode('latin'), 'y':y, 'p':p, 'g':g}).encode('latin')
 
     def do_key(self,request):
         session = request.getSession()
 
-        cypher_suite = SESSIONS[session]['cypher_suite']
+        cipher_suite = SESSIONS[session]['cipher_suite']
         print(request.args[b'certificate'][0])
 
         cert = x509.load_pem_x509_certificate(request.args[b'certificate'][0])
         print(cert.not_valid_before)
 
-        DH_key = self.get_DH_Key(session,int(request.args[b'DH_PARAMETER'][0].decode()),cypher_suite)
+        DH_key = self.get_DH_Key(session,int(request.args[b'DH_PARAMETER'][0].decode()),cipher_suite)
         CLIENT_PUBLIC_KEY = cert.public_key()
 
-        self.verify_signature(request.args[b'signature'][0], cypher_suite,CLIENT_PUBLIC_KEY, SESSIONS[session]['client_random']+ SESSIONS[session]['server_random'] + request.args[b'DH_PARAMETER'][0])
-        self.getSessionkeys(session,cypher_suite,DH_key)
+        self.verify_signature(request.args[b'signature'][0], cipher_suite,CLIENT_PUBLIC_KEY, SESSIONS[session]['client_random']+ SESSIONS[session]['server_random'] + request.args[b'DH_PARAMETER'][0])
+        self.getSessionkeys(session,cipher_suite,DH_key)
         
 
     # Handle a GET request
@@ -442,7 +442,7 @@ class MediaServer(resource.Resource):
             server_write_key = SESSIONS[session]['server_write_key']
         else:
             server_write_key= key
-        cipher_suite = SESSIONS[session]['cypher_suite']
+        cipher_suite = SESSIONS[session]['cipher_suite']
         
         server_write_MAC_key = SESSIONS[session]['server_write_MAC_key']
 
@@ -467,7 +467,7 @@ class MediaServer(resource.Resource):
         return iv + self.generate_hmac(server_write_MAC_key, cipher_suite,   iv +encrypted_data) + encrypted_data
 
     def decrypt_comunication(self, session, data):
-        cipher_suite = SESSIONS[session]['cypher_suite']
+        cipher_suite = SESSIONS[session]['cipher_suite']
         client_write_key = SESSIONS[session]['client_write_key']
         client_write_MAC_key = SESSIONS[session]['client_write_MAC_key']
 
@@ -510,8 +510,8 @@ class MediaServer(resource.Resource):
 
         return unpadded_data
 
-    def decrypt_symetric(self,key,iv,cypher_suite,data):
-        if "AES256" in cypher_suite:
+    def decrypt_symetric(self,key,iv,cipher_suite,data):
+        if "AES256" in cipher_suite:
             cipher = Cipher(
                 algorithms.AES(key),
                 modes.CBC(iv)
@@ -522,13 +522,13 @@ class MediaServer(resource.Resource):
 
         return decrypted_data
 
-    def generate_hmac(self, key, cypher_suite, data):
+    def generate_hmac(self, key, cipher_suite, data):
         #print("data",data)
-        if "SHA256" in cypher_suite:
+        if "SHA256" in cipher_suite:
             h = hmac.HMAC(key, hashes.SHA256())
             h.update(data)
         
-        elif "SHA384" in cypher_suite:
+        elif "SHA384" in cipher_suite:
             h = hmac.HMAC(key, hashes.SHA384())
             h.update(data)
 
@@ -544,8 +544,8 @@ class MediaServer(resource.Resource):
         return digest.finalize()
 
     
-    def make_signature(self, cypher_suite, data, key=SERVER_PRIVATE_KEY):
-        if "SHA384" in cypher_suite:
+    def make_signature(self, cipher_suite, data, key=SERVER_PRIVATE_KEY):
+        if "SHA384" in cipher_suite:
             signature = SERVER_PRIVATE_KEY.sign(
                 data,
                 padding.PSS(
@@ -555,7 +555,7 @@ class MediaServer(resource.Resource):
                 hashes.SHA384()
             )
         
-        elif "SHA256" in cypher_suite:
+        elif "SHA256" in cipher_suite:
             signature = SERVER_PRIVATE_KEY.sign(
                 data,
                 padding.PSS(
@@ -575,12 +575,12 @@ class MediaServer(resource.Resource):
             hashes.SHA1()
         )
 
-    def verify_signature(self,signature,cypher_suite,pub_key,data):
-        if "SHA384" in cypher_suite:
+    def verify_signature(self,signature,cipher_suite,pub_key,data):
+        if "SHA384" in cipher_suite:
             hash_type = hashes.SHA384()
             hash_type2 = hashes.SHA384()
 
-        elif "SHA256" in cypher_suite:
+        elif "SHA256" in cipher_suite:
             hash_type = hashes.SHA256()
             hash_type2 = hashes.SHA256()
 
@@ -600,15 +600,15 @@ class MediaServer(resource.Resource):
         shared_key = SESSIONS[session]['DH_private_key'].exchange(peer_public_key)
         return shared_key
 
-    def getSessionkeys(self,session,cypher_suite, dh_key):
-        if "SHA384" in cypher_suite:
+    def getSessionkeys(self,session,cipher_suite, dh_key):
+        if "SHA384" in cipher_suite:
             hash_type = hashes.SHA384()
             size = 48
-        elif "SHA256" in cypher_suite:
+        elif "SHA256" in cipher_suite:
             hash_type = hashes.SHA256()
             size = 32
 
-        if "AES256" in cypher_suite:
+        if "AES256" in cipher_suite:
             hkdf = HKDF(
                 algorithm = hash_type,
                 length = 64 + size * 2,
