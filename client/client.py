@@ -31,26 +31,32 @@ with open("../private_keys_and_certificates/client_private_key.pem", "rb") as ke
 
 SERVER_URL = 'http://127.0.0.1:8080'
 SERVER_PUBLIC_KEY = None
+CLIENT_WRITE_MAC_KEY = None
+CLIENT_WRITE_KEY = None
+SERVER_WRITE_MAC_KEY = None
+SERVER_WRITE_KEY = None
 
 CLIENT_CERTIFICATE = open("../private_keys_and_certificates/client_certificate.pem",'rb').read().decode()
 
 # client knows the song distributor
-DISTRIBUTER_CERTIFICATE = open("../private_keys_and_certificates/distributor_certificate.pem",'rb').read().decode()
+DISTRIBUTER_CERTIFICATE = open("../private_keys_and_certificates/distributor_certificate.pem",'rb').read()
+#DISTRIBUTER_PUBLIC_KEY = DISTRIBUTER_CERTIFICATE.public_key()
+DISTRIBUTER_PUBLIC_KEY = x509.load_pem_x509_certificate(DISTRIBUTER_CERTIFICATE).public_key()
 
-CLIENT_CYPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
-CHOSEN_CYPHER_SUITE = None
+CLIENT_CIPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
+CHOSEN_CIPHER_SUITE = None
 
 s = requests.Session()
 
-def getSessionkeys(cypher_suite, dh_key,client_random,server_random):
-    if "SHA384" in cypher_suite:
+def getSessionkeys(cipher_suite, dh_key,client_random,server_random):
+    if "SHA384" in cipher_suite:
         hash_type = hashes.SHA384()
         size = 48
-    elif "SHA256" in cypher_suite:
+    elif "SHA256" in cipher_suite:
         hash_type = hashes.SHA256()
         size = 32
 
-    if "AES256" in cypher_suite:
+    if "AES256" in cipher_suite:
         hkdf = HKDF(
             algorithm = hash_type,
             length = 64 + size*2,
@@ -67,8 +73,8 @@ def getSessionkeys(cypher_suite, dh_key,client_random,server_random):
 
     return c_w_mac_k, s_w_mac_k, c_w_k, s_w_k
 
-def make_signature(cypher_suite, data, key = CLIENT_PRIVATE_KEY):
-    if "SHA384" in cypher_suite:
+def make_signature(cipher_suite, data, key = CLIENT_PRIVATE_KEY):
+    if "SHA384" in cipher_suite:
         signature = key.sign(
             data,
             padding.PSS(
@@ -78,7 +84,7 @@ def make_signature(cypher_suite, data, key = CLIENT_PRIVATE_KEY):
             hashes.SHA384()
         )
     
-    elif "SHA256" in cypher_suite:
+    elif "SHA256" in cipher_suite:
         signature = key.sign(
             data,
             padding.PSS(
@@ -90,14 +96,14 @@ def make_signature(cypher_suite, data, key = CLIENT_PRIVATE_KEY):
     
     return signature
 
-def encrypt_comunication(cypher_suite, data):
-    if "AES256" in cypher_suite:
+def encrypt_comunication(cipher_suite, data, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY):
+    if "AES256" in cipher_suite:
         iv = os.urandom(16)
         cipher = Cipher(
             algorithms.AES(CLIENT_WRITE_KEY),
             modes.CBC(iv)
         )
-    elif "AES256-GCM" in cypher_suite:
+    elif "AES256-GCM" in cipher_suite:
         """
         iv= os.urandom(12)
         cipher = Cipher(
@@ -109,7 +115,7 @@ def encrypt_comunication(cypher_suite, data):
 
     encrypted_data = encryptor.update(padding_data(data, 128)) + encryptor.finalize()
 
-    return iv + generate_hmac(CLIENT_WRITE_MAC_KEY, cypher_suite,   iv +encrypted_data) + encrypted_data
+    return iv + generate_hmac(CLIENT_WRITE_MAC_KEY, cipher_suite,   iv +encrypted_data) + encrypted_data
 
 def decrypt_comunication(s_w_k, s_w_m_k,cipher_suite, data):
     if "AES256" in cipher_suite:
@@ -165,13 +171,12 @@ def unpadding_data(data,nbits):
 
     return unpadded_data
 
-def generate_hmac(key, cypher_suite, data):
-    #print("data",data)
-    if "SHA256" in cypher_suite:
+def generate_hmac(key, cipher_suite, data):
+    if "SHA256" in cipher_suite:
         h = hmac.HMAC(key, hashes.SHA256())
         h.update(data)
     
-    elif "SHA384" in cypher_suite:
+    elif "SHA384" in cipher_suite:
         h = hmac.HMAC(key, hashes.SHA384())
         h.update(data)
 
@@ -183,15 +188,37 @@ def hash_stuff(cipher_suite,data):
         
         elif "SHA384" in cipher_suite:
             digest = hashes.Hash(hashes.SHA384())
+
         digest.update(data)
+
         return digest.finalize()
+
+def verify_signature(signature, cipher_suite, key, data):
+    if "SHA256" in cipher_suite:
+        hash_type = hashes.SHA256()
+        hash_type2 = hashes.SHA256()
+
+    elif "SHA384" in cipher_suite:
+        hash_type = hashes.SHA384()
+        hash_type2 = hashes.SHA384()
+
+    key.verify(
+        signature,
+            data,
+            padding.PSS(
+                mgf = padding.MGF1(hash_type),
+                salt_length = padding.PSS.MAX_LENGTH
+        ),
+        hash_type2
+    )
 
 def user_authentication(cipher_suite):
 
     # mac
-    lib = '/usr/local/lib/libpteidpkcs11.so'
+    #lib = '/usr/local/lib/libpteidpkcs11.dylib'
 
     #linux
+    lib = '/usr/local/lib/libpteidpkcs11.so'
     #lib = '/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so'
 
     pkcs11 = PyKCS11.PyKCS11Lib()
@@ -259,7 +286,7 @@ def main():
     # Get a list of media files
     print("Contacting Server")
     client_random = os.urandom(28)
-    req = s.post(f'{SERVER_URL}/api/protocols', data= {"cypher_suite":CLIENT_CYPHER_SUITES,"client_random":client_random})
+    req = s.post(f'{SERVER_URL}/api/protocols', data= {"cipher_suite":CLIENT_CIPHER_SUITES,"client_random":client_random})
     print(client_random)
 
     # TODO: Secure the session
@@ -275,23 +302,13 @@ def main():
     print(cert.not_valid_before)
 
     SERVER_PUBLIC_KEY = cert.public_key()
-    CHOSEN_CYPHER_SUITE = req['cypher_suite']
-    
-    if "SHA256" in CHOSEN_CYPHER_SUITE:
-        hash_type = hashes.SHA256()
-        hash_type2 = hashes.SHA256()
-    elif "SHA384" in CHOSEN_CYPHER_SUITE:
-        hash_type = hashes.SHA384()
-        hash_type2 = hashes.SHA384()
+    CHOSEN_CIPHER_SUITE = req['cipher_suite']
 
-    SERVER_PUBLIC_KEY.verify(
-        req['signature'].encode('latin'),
-        client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode(),
-        padding.PSS(
-            mgf = padding.MGF1(hash_type),
-            salt_length = padding.PSS.MAX_LENGTH
-        ),
-        hash_type2
+    verify_signature(
+        req['signature'].encode('latin'), 
+        CHOSEN_CIPHER_SUITE, 
+        SERVER_PUBLIC_KEY, 
+        client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode()
     )
 
     pn = dh.DHParameterNumbers(p, g)
@@ -306,7 +323,7 @@ def main():
 
     y = public_key.public_numbers().y
 
-    signature = make_signature(CHOSEN_CYPHER_SUITE, client_random + server_random + str(y).encode())
+    signature = make_signature(CHOSEN_CIPHER_SUITE, client_random + server_random + str(y).encode())
     req = s.post(f'{SERVER_URL}/api/key', data={'certificate': CLIENT_CERTIFICATE , 'DH_PARAMETER':y, 'signature': signature})
 
     shared_key = private_key.exchange(peer_public_key)
@@ -316,21 +333,18 @@ def main():
     global SERVER_WRITE_MAC_KEY
     global SERVER_WRITE_KEY
 
-    CLIENT_WRITE_MAC_KEY, SERVER_WRITE_MAC_KEY, CLIENT_WRITE_KEY, SERVER_WRITE_KEY = getSessionkeys(CHOSEN_CYPHER_SUITE, shared_key,client_random,server_random)
+    CLIENT_WRITE_MAC_KEY, SERVER_WRITE_MAC_KEY, CLIENT_WRITE_KEY, SERVER_WRITE_KEY = getSessionkeys(CHOSEN_CIPHER_SUITE, shared_key,client_random,server_random)
     
-    #print("public key:  ", public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
-
-    #print("server's public key:  ", peer_public_key.public_bytes(encoding = Encoding.PEM, format = PublicFormat.SubjectPublicKeyInfo))
-    e= encrypt_comunication(CHOSEN_CYPHER_SUITE, b"api/finished")
+    e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/finished", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
     req = s.get(f'{SERVER_URL}/', params={'data':e})
     req= req.json()
     finished_data = req['data'].encode('latin')
 
-    message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CYPHER_SUITE,finished_data)
+    message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CIPHER_SUITE,finished_data)
 
     print(message)
     
-    e= encrypt_comunication(CHOSEN_CYPHER_SUITE, b"api/list")
+    e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/list", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
     req = s.get(f'{SERVER_URL}/', params={'data':e})
     print(req.status_code)
     req = req.json()
@@ -341,47 +355,54 @@ def main():
 
 
     # send user authentication
-    chain, signature = user_authentication(CHOSEN_CYPHER_SUITE)
+    chain, signature = user_authentication(CHOSEN_CIPHER_SUITE)
 
     authorization_data = json.dumps({'url': 'api/auth','signature': signature.decode("latin"), 'certificate': chain})
     
-    e = encrypt_comunication(CHOSEN_CYPHER_SUITE, authorization_data.encode("latin"))
+    e = encrypt_comunication(CHOSEN_CIPHER_SUITE, authorization_data.encode("latin"), CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
 
     req = s.post(f'{SERVER_URL}/', data = {'data': e})
 
 
-    e= encrypt_comunication(CHOSEN_CYPHER_SUITE, b"api/list")
+    e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/list", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
     req = s.get(f'{SERVER_URL}/', params={'data':e})
     print(req.status_code)
     req = req.json()
     list_data=  req['data'].encode('latin')
     
-    message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CYPHER_SUITE,list_data)
+    message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CIPHER_SUITE,list_data)
 
     media_list = json.loads(message.decode('latin'))
 
+    license_list = media_list['licence_list']
+
+    media_list = media_list['media_list']
+
+    
+
 
     print(media_list)
-    
-    """
-    req = requests.get(f'{SERVER_URL}/api/list')
-    if req.status_code == 200:
-        print("Got Server List")
-
-    media_list = req.json()
-    """
-
 
     # Present a simple selection menu    
     idx = 0
     print("MEDIA CATALOG\n")
     for item in media_list:
-        print(f'{idx} - {media_list[idx]["name"]}')
+        print("media data: ", (item['media']['id'] + item['media']['name'] + item['media']['description'] + str(item['media']['chunks']) + str(item['media']['duration'])).encode("latin"))
+        
+        verify_signature(
+            item['distributor_signature'].encode("latin"), 
+            CHOSEN_CIPHER_SUITE, 
+            DISTRIBUTER_PUBLIC_KEY, 
+            (item['media']['id'] + item['media']['name'] + item['media']['description'] + str(item['media']['chunks']) + str(item['media']['duration'])).encode("latin")
+        )
+        print(f'{idx} - {item["media"]["name"]}')
     print("----")
 
     while True:
         selection = input("Select a media file number (q to quit): ")
         if selection.strip() == 'q':
+            e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/exit", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
+            req = s.get(f'{SERVER_URL}/', params={'data':e})
             sys.exit(0)
 
         if not selection.isdigit():
@@ -392,7 +413,7 @@ def main():
             break
 
     # Example: Download first file
-    media_item = media_list[selection]
+    media_item = media_list[selection]['media']
     print(f"Playing {media_item['name']}")
 
     # Detect if we are running on Windows or Linux
@@ -406,19 +427,19 @@ def main():
     # Get data from server and send it to the ffplay stdin through a pipe
     for chunk in range(media_item['chunks'] + 1):
         uri= f'api/download?id={media_item["id"]}&chunk={chunk}'
-        e= encrypt_comunication(CHOSEN_CYPHER_SUITE, uri.encode())
+        e= encrypt_comunication(CHOSEN_CIPHER_SUITE, uri.encode(), CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
         req = s.get(f'{SERVER_URL}/', params={'data':e})
 
         chunk_data = req.json()
         chunk_data=  chunk_data['data'].encode('latin')
 
         # 1-hash chunk id
-        hash_chunk = hash_stuff(CHOSEN_CYPHER_SUITE,chunk.to_bytes(2,'big'))
+        hash_chunk = hash_stuff(CHOSEN_CIPHER_SUITE,chunk.to_bytes(2,'big'))
 
         #hash server_write_key + 1
-        final_hash = hash_stuff(CHOSEN_CYPHER_SUITE,SERVER_WRITE_KEY+hash_chunk)
+        final_hash = hash_stuff(CHOSEN_CIPHER_SUITE,SERVER_WRITE_KEY+hash_chunk)
 
-        chunk_data = json.loads(decrypt_comunication(final_hash,SERVER_WRITE_MAC_KEY,CHOSEN_CYPHER_SUITE,chunk_data).decode('latin'))
+        chunk_data = json.loads(decrypt_comunication(final_hash,SERVER_WRITE_MAC_KEY,CHOSEN_CIPHER_SUITE,chunk_data).decode('latin'))
         print(chunk_data)
         # TODO: Process chunk
 
