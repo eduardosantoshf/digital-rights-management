@@ -186,7 +186,7 @@ def hash_stuff(cipher_suite,data):
 def user_authentication(cipher_suite):
 
     # mac
-    lib = '/usr/local/lib/libpteidpkcs11.dylib'
+    lib = '/usr/local/lib/libpteidpkcs11.so'
 
     #linux
     #lib = '/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so'
