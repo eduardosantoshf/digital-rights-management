@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import requests
 from twisted.web import server, resource
 from twisted.internet import reactor, defer
 import logging
@@ -8,7 +9,9 @@ import json
 import os
 import math
 from urllib import parse
+from datetime import datetime
 from cryptography import x509
+from cryptography.x509.oid import NameOID,ExtensionOID
 from cryptography.hazmat.primitives import serialization, hashes, hmac
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import padding as real_padding
@@ -253,11 +256,11 @@ class MediaServer(resource.Resource):
                 if path == 'api/auth':
                     
                     #print(data['certificate'])
-
                     user_certificate = x509.load_der_x509_certificate(data['certificate'][0].encode("latin"))
+                    uid= user_certificate.subject.get_attributes_for_oid(NameOID.SERIAL_NUMBER)[0].value
                     print(user_certificate)
-
-
+                    if self.user_verify_signature(data['signature'].encode("latin"),user_certificate.public_key(),uid.encode()) and self.check_user_cert_chain(data['certificate']):
+                        SESSIONS[session]['user_id']=uid
                     #s = self.encrypt_comunication(b'finished',request.getSession() )
                     #return json.dumps({'data':s.decode("latin")}).encode('latin')
                 
@@ -271,6 +274,109 @@ class MediaServer(resource.Resource):
             request.responseHeaders.addRawHeader(b"content-type", b"text/plain")
             return b''
 
+    def check_user_cert_chain(self,cert_chain):
+        if not self.validate_attributes(cert_chain):
+            return False
+
+        if not self.validate_crl(cert_chain):
+            return False
+
+        if not self.check_cert_signature(cert_chain): 
+            return False 
+        return True 
+
+    """
+        CITIZEN AUTHENTICATION CERTIFICATE ATRIBUTES:
+        ORGANIZATION_NAME: Cartão de Cidadão
+        KEY_USAGE: digital_signature
+
+        AUTHENTICATION SUB CA:
+        ORGANIZATION_NAME: Cartão de Cidadão
+        KEY_USAGE: key_cert_sign=True, crl_sign=True
+
+        ROOT CA:
+        ORGANIZATION_NAME: SCEE - Sistema de Certificação Electrónica do Estado
+        KEY_USAGE: key_cert_sign=True, crl_sign=True
+
+    """
+    def validate_attributes(self,cert_chain):
+        #CITIZEN AUTHENTICATION CERTIFICATE
+        c=x509.load_der_x509_certificate(cert_chain[0].encode("latin"))
+        key_usage=c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+        if not (key_usage.digital_signature and not key_usage.content_commitment and not key_usage.key_encipherment 
+            and not key_usage.data_encipherment and not key_usage.key_agreement and not key_usage.key_cert_sign  
+            and not key_usage.crl_sign and not key_usage.encipher_only and not key_usage.decipher_only):
+            
+            return False
+
+        elif not (c.not_valid_before< datetime.now()< c.not_valid_after):
+            return False
+        elif not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME).value=='Cartão de Cidadão'):
+            return False
+
+        c=x509.load_der_x509_certificate(cert_chain[1].encode("latin"))
+        key_usage=c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+        if not (not key_usage.digital_signature and not key_usage.content_commitment and not key_usage.key_encipherment 
+            and not key_usage.data_encipherment and not key_usage.key_agreement and key_usage.key_cert_sign  
+            and  key_usage.crl_sign and not key_usage.encipher_only and not key_usage.decipher_only):
+            
+            return False
+
+        elif not (c.not_valid_before< datetime.now()< c.not_valid_after):
+            return False
+        elif not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME).value=='Cartão de Cidadão'):
+            return False
+
+        c=x509.load_der_x509_certificate(cert_chain[1].encode("latin"))
+        key_usage=c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+        if not (not key_usage.digital_signature and not key_usage.content_commitment and not key_usage.key_encipherment 
+            and not key_usage.data_encipherment and not key_usage.key_agreement and key_usage.key_cert_sign  
+            and  key_usage.crl_sign and not key_usage.encipher_only and not key_usage.decipher_only):
+            
+            return False
+
+        elif not (c.not_valid_before< datetime.now()< c.not_valid_after):
+            return False
+        elif not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME).value=='SCEE - Sistema de Certificação Electrónica do Estado'):
+            return False
+        return True
+
+    def check_cert_signature(self,cert_chain):
+        for cert in range(len(cert_chain)-1):
+
+            c = x509.load_der_x509_certificate(cert_chain[cert].encode("latin"))
+            ci = x509.load_der_x509_certificate(cert_chain[cert+1].encode("latin"))
+            issuer_public_key = ci.public_key()
+            try:
+                issuer_public_key.verify(
+                    c.signature,
+                    c.tbs_certificate_bytes,
+                    padding.PKCS1v15(),
+                    c.signature_hash_algorithm,
+                )
+            except:
+                print("check")
+                return False
+        return True
+
+    def validate_crl(self,cert_chain):
+        for cert in range(len(cert_chain)-1):
+            c = x509.load_der_x509_certificate(cert_chain[cert].encode("latin"))
+            #print(c.extensions.get_extension_for_oid(ExtensionOID.FRESHEST_CRL).value[0].full_name)
+            #print(c.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS).value[0].full_name)
+            r= requests.get(c.extensions.get_extension_for_oid(ExtensionOID.CRL_DISTRIBUTION_POINTS).value[0].full_name[0].value, allow_redirects=True)
+            crl= x509.load_der_x509_crl(r.content)
+            if not crl.get_revoked_certificate_by_serial_number(c.serial_number) is  None:
+                return False
+            try:
+                r= requests.get(c.extensions.get_extension_for_oid(ExtensionOID.FRESHEST_CRL).value[0].full_name[0].value, allow_redirects=True)
+                crl= x509.load_der_x509_crl(r.content)
+                if not crl.get_revoked_certificate_by_serial_number(c.serial_number) is None:
+                    return False
+            except:
+                logger.warning("no crl delta")
+        return True
+    
     def generate_DH_parameter(self,session):
         
         parameters = dh.generate_parameters(generator = 2, key_size = 2048)
@@ -418,6 +524,13 @@ class MediaServer(resource.Resource):
             )
         
         return signature
+    def user_verify_signature(self,signature,pub_key,data):
+        pub_key.verify(
+            signature,
+            data,
+            padding.PKCS1v15(),
+            hashes.SHA1()
+        )
 
     def verify_signature(self,signature,cypher_suite,pub_key,data):
         if "SHA384" in cypher_suite:
