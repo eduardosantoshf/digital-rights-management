@@ -610,7 +610,13 @@ def downloadMusic(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERV
         hash_chunk = hash_stuff(CHOSEN_CIPHER_SUITE,chunk.to_bytes(2,'big'))
 
         #hash server_write_key + 1
-        final_hash = hash_stuff(CHOSEN_CIPHER_SUITE,SERVER_WRITE_KEY+hash_chunk)
+        if "AES256" in CHOSEN_CIPHER_SUITE or "ChaCha20" in CHOSEN_CIPHER_SUITE:
+            final_hash = hash_stuff(CHOSEN_CIPHER_SUITE,SERVER_WRITE_KEY + hash_chunk)
+            final_hash = final_hash[:32]
+
+        elif "AES128" in CHOSEN_CIPHER_SUITE:
+            final_hash = hash_stuff(CHOSEN_CIPHER_SUITE,SERVER_WRITE_KEY + hash_chunk)
+            final_hash = final_hash[:16]
 
         chunk_data = json.loads(decrypt_comunication(final_hash,SERVER_WRITE_MAC_KEY,CHOSEN_CIPHER_SUITE,chunk_data).decode('latin'))
 

@@ -321,7 +321,16 @@ class MediaServer(resource.Resource):
             hash_chunk = self.hash(cipher_suite,chunk_id.to_bytes(2,'big'))
 
             #hash server_write_key + 1
-            final_hash = self.hash(cipher_suite,s_w_k+hash_chunk)
+            #256: 32
+            #128: 16
+            #cha: 32
+            if "AES256" in cipher_suite or "ChaCha20" in cipher_suite:
+                final_hash = self.hash(cipher_suite, s_w_k + hash_chunk)
+                final_hash = final_hash[:32]
+            
+            elif "AES128" in cipher_suite:
+                final_hash = self.hash(cipher_suite, s_w_k + hash_chunk)
+                final_hash = final_hash[:16]
 
             data = json.dumps(
                     {
@@ -334,7 +343,7 @@ class MediaServer(resource.Resource):
 
             request.setResponseCode(200)
 
-            data = self.encrypt_comunication(data,session,key=final_hash)
+            data = self.encrypt_comunication(data, session, key = final_hash)
             return json.dumps({'data':data.decode("latin")}).encode('latin')
 
         #if file did not open
