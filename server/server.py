@@ -38,7 +38,10 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
 
-SERVER_CIPHER_SUITES = ['DHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
+SERVER_CIPHER_SUITES = ['DHE_AES256_CBC_SHA384','DHE_AES256_CFB_SHA384',
+                        'DHE_AES128_CBC_SHA256','DHE_AES128_CBC_SHA384',
+                        'DHE_ChaCha20_CBC_SHA384','DHE_ChaCha20_CFB_SHA384','DHE_ChaCha20_CFB_SHA256'
+                       ]
 
 SESSIONS={}
 
@@ -345,13 +348,15 @@ class MediaServer(resource.Resource):
         # Check if cipher suites were sent
         if 'cipher_suite' not in request.args:
             request.setResponseCode(400)
-            s = self.encrypt_comunication(b'No cipher suite found',session)
-            return json.dumps({'data':s.decode("latin")}).encode('latin') 
+            return b'No cipher suite found'
         
         client_cipher_suites = request.args.get(b'cipher_suite')
         chosen_cipher_suite = None
 
-        # choose cipher suite 
+        # Choose cipher suite 
+        # Note:
+        # In normal conditions the server would have a list ordered by preferences
+        # in the project context we will do a random
         for csuite in client_cipher_suites:
             csuite = csuite.decode()
             if csuite in SERVER_CIPHER_SUITES:
@@ -388,14 +393,12 @@ class MediaServer(resource.Resource):
         # Check if client sent the initial message
         if session not in SESSIONS:
             request.setResponseCode(400)
-            s = self.encrypt_comunication(b'Must exchange cipher suites first',session)
-            return json.dumps({'data':s.decode("latin")}).encode('latin') 
+            return b'Must exchange cipher suites first'
 
         cipher_suite = SESSIONS[session]['cipher_suite']
-        #print(request.args[b'certificate'][0])
 
         cert = x509.load_pem_x509_certificate(request.args[b'certificate'][0])
-        #print(cert.not_valid_before)
+
         SESSIONS[session]['client']= cert.subject
         DH_key = self.get_DH_Key(session,int(request.args[b'DH_PARAMETER'][0].decode()),cipher_suite)
         CLIENT_PUBLIC_KEY = cert.public_key()
@@ -452,7 +455,8 @@ class MediaServer(resource.Resource):
 
                     args = dict(parse.parse_qsl(parse.urlsplit(url).query))
                     return self.generate_license(args['id'],args['type'],request)
-                    
+                
+                request.setResponseCode(404)   
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 return b'Methods: /api/protocols /api/list /api/download'
 
@@ -505,18 +509,18 @@ class MediaServer(resource.Resource):
                             return json.dumps({'data':s.decode("latin")}).encode('latin')
                         
                         else:
-                            s = self.encrypt_comunication(b'failed to authenticate user', session)
+                            request.setResponseCode(400)  
+                            s = self.encrypt_comunication(b'Failed to authenticate user. Invalid Certificate', session)
 
                             return json.dumps({'data':s.decode("latin")}).encode('latin')
 
                     except:
-                        s = self.encrypt_comunication(b'failed to authenticate user', session)
+                        request.setResponseCode(400)  
+                        s = self.encrypt_comunication(b'Failed to authenticate user. Invalid signature', session)
 
                         return json.dumps({'data':s.decode("latin")}).encode('latin')
-                    #s = self.encrypt_comunication(b'finished',request.getSession() )
-                    #return json.dumps({'data':s.decode("latin")}).encode('latin')
                 
-
+                request.setResponseCode(404)  
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 return b'Methods: /api/protocols /api/list /api/download'
 

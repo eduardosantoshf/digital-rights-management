@@ -47,7 +47,10 @@ USER_ID=None
 DISTRIBUTER_CERTIFICATE = open("../private_keys_and_certificates/distributor_certificate.pem",'rb').read()
 DISTRIBUTER_PUBLIC_KEY = x509.load_pem_x509_certificate(DISTRIBUTER_CERTIFICATE).public_key()
 
-CLIENT_CIPHER_SUITES = ['DHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
+CLIENT_CIPHER_SUITES = ['DHE_AES256_CBC_SHA384','DHE_AES256_CFB_SHA384','DHE_AES256_CFB_SHA256',
+                        'DHE_AES128_CBC_SHA256','DHE_AES128_CBC_SHA384','DHE_AES128_CBF_SHA384',
+                        'DHE_ChaCha20_CBC_SHA384','DHE_ChaCha20_CFB_SHA384','DHE_ChaCha20_CFB_SHA256'
+                       ]
 CHOSEN_CIPHER_SUITE = None
 
 s = requests.Session()
@@ -166,6 +169,11 @@ def decrypt_comunication(s_w_k, s_w_m_k,cipher_suite, data):
     else:
         return 0
 
+#------------------------------------------------------------------#
+
+
+#-----------------------Decrypt symetric---------------------------#
+
 def decrypt_symetric(key,iv,cipher_suite,data):
     if "AES256" in cipher_suite:
         cipher = Cipher(
@@ -178,6 +186,11 @@ def decrypt_symetric(key,iv,cipher_suite,data):
 
     return decrypted_data
 
+#------------------------------------------------------------------#
+
+
+#-------------------------Padding Data-----------------------------#
+
 def padding_data(data, bits):
     padder = real_padding.PKCS7(bits).padder()
     padded_data = padder.update(data)
@@ -185,12 +198,22 @@ def padding_data(data, bits):
 
     return padded_data
 
+#------------------------------------------------------------------#
+
+
+#------------------------Unpadding Data----------------------------#
+
 def unpadding_data(data,nbits):
     unpadder = real_padding.PKCS7(nbits).unpadder()
     unpadded_data = unpadder.update(data)
     unpadded_data += unpadder.finalize()
 
     return unpadded_data
+
+#------------------------------------------------------------------#
+
+
+#-------------------------Generate HMAC----------------------------#
 
 def generate_hmac(key, cipher_suite, data):
     if "SHA256" in cipher_suite:
@@ -203,6 +226,11 @@ def generate_hmac(key, cipher_suite, data):
 
     return h.finalize()
 
+#------------------------------------------------------------------#
+
+
+#------------------------Hash algorithm----------------------------#
+
 def hash_stuff(cipher_suite,data):
         if "SHA256" in cipher_suite:
             digest = hashes.Hash(hashes.SHA256())
@@ -213,6 +241,11 @@ def hash_stuff(cipher_suite,data):
         digest.update(data)
 
         return digest.finalize()
+
+#------------------------------------------------------------------#
+
+
+#----------------------Verify a signature--------------------------#
 
 def verify_signature(signature, cipher_suite, key, data):
     if "SHA256" in cipher_suite:
@@ -232,6 +265,11 @@ def verify_signature(signature, cipher_suite, key, data):
         ),
         hash_type2
     )
+
+#------------------------------------------------------------------#
+
+
+#----------------------Authenticate User---------------------------#
 
 def user_authentication(cipher_suite):
 
@@ -300,6 +338,11 @@ def user_authentication(cipher_suite):
 
     return [citizen_auth_certificate, auth_sub_ca_certificate, root_ca_certificate], signature
 
+#------------------------------------------------------------------#
+
+
+#-------------------------Client Menu------------------------------#
+
 def menu():
     print("|--------------------------------------|")
     print("|                 MENU                 |")
@@ -309,6 +352,11 @@ def menu():
     print("|--------  2 DOWNLOAD MUSIC   ---------|")
     print("|--------  3 AQUIRE LICENSE   ---------|")
     print("|-------------  q QUIT   --------------|")
+
+#------------------------------------------------------------------#
+
+
+#----------------------Choose License Menu-------------------------#
 
 def license_menu():
     print("|--------------------------------------|")
@@ -320,6 +368,11 @@ def license_menu():
     print("|--------    (3) 10 PLAYS   ----------|")
     print("|--------  (4) 20 PLAYS   ---------|")
     print("|-------------  q RETURN   --------------|")
+
+#------------------------------------------------------------------#
+
+
+#---------------------Cooroborate Licenses-------------------------#
 
 def check_licenses(licence_list):
     files = os.listdir('./licenses/')
@@ -333,6 +386,11 @@ def check_licenses(licence_list):
             if not any(data["media_id"]==l["media_id"] and data["plays"]==l["plays"] for l in licence_list ):
                 return False
     return True
+
+#------------------------------------------------------------------#
+
+
+#-----------------Get Music and Licenses List----------------------#
 
 def getMusicList(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY):
     e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/list", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
@@ -358,8 +416,6 @@ def getMusicList(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVE
         
         print("----")
 
-
-   
     idx = 0
     print("MEDIA CATALOG\n")
     for item in media_list:      
@@ -374,7 +430,12 @@ def getMusicList(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVE
     print("----")
 
     return media_list
-    
+
+#------------------------------------------------------------------#
+
+
+#------------------------Aquire a License--------------------------#
+
 def aquireLicense(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY, SERVER_PUBLIC_KEY):
     media_list=getMusicList(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY)
 
@@ -446,10 +507,17 @@ def aquireLicense(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERV
         print("server gave bad license")
         return
     
+#------------------------------------------------------------------#
+
+
+#------------------------Download a Music--------------------------#
 
 def downloadMusic(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY):
+    
+    # Get media and license list
     media_list=getMusicList(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY)
 
+    #Choose a media to download
     while True:
         selection = input("Select a media file number (q to quit): ")
         if selection.strip() == 'q':
@@ -464,7 +532,6 @@ def downloadMusic(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERV
         if 0 <= selection<=len(media_list):
             break
 
-    # Example: Download first file
     media_item = media_list[selection]['media']
     print(f"Playing {media_item['name']}")
 
@@ -508,8 +575,6 @@ def downloadMusic(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERV
         final_hash = hash_stuff(CHOSEN_CIPHER_SUITE,SERVER_WRITE_KEY+hash_chunk)
 
         chunk_data = json.loads(decrypt_comunication(final_hash,SERVER_WRITE_MAC_KEY,CHOSEN_CIPHER_SUITE,chunk_data).decode('latin'))
-        print(chunk_data)
-        # TODO: Process chunk
 
         data = binascii.a2b_base64(chunk_data['data'].encode('latin'))
         try:
@@ -517,22 +582,41 @@ def downloadMusic(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERV
         except:
             break
 
+#------------------------------------------------------------------#
+
+
+#-------------------------------Quit-------------------------------#
+
+def quit_program(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY):
+    #Send exit message and close
+    e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/exit", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
+    req = s.get(f'{SERVER_URL}/', params={'data':e})
+    sys.exit(0)
+
 def main():
     print("|--------------------------------------|")
     print("|         SECURE MEDIA CLIENT          |")
     print("|--------------------------------------|\n")
 
-    # Get a list of media files
     print("Contacting Server")
-    client_random = os.urandom(28)
-    req = s.post(f'{SERVER_URL}/api/protocols', data= {"cipher_suite":CLIENT_CIPHER_SUITES,"client_random":client_random})
-    print(client_random)
 
-    # TODO: Secure the session
+    #Generate a client random
+    client_random = os.urandom(28)
+
+    #Client Hello with random and cipher_suite
+    req = s.post(f'{SERVER_URL}/api/protocols', data= {"cipher_suite":CLIENT_CIPHER_SUITES,"client_random":client_random})
+
+    if req.status_code>= 400:
+        print("Error on Client Hello: " + req.text)
+        print("Server error message: " + req.text)
+        return
+
     req = req.json()
     
+    #Get Server Random
     server_random = req['server_random'].encode('latin')
 
+    #Get DH Parameters
     y = int(req['y'])
     p = int(req['p'])
     g = int(req['g'])
@@ -565,6 +649,11 @@ def main():
     signature = make_signature(CHOSEN_CIPHER_SUITE, client_random + server_random + str(y).encode())
     req = s.post(f'{SERVER_URL}/api/key', data={'certificate': CLIENT_CERTIFICATE , 'DH_PARAMETER':y, 'signature': signature})
 
+    if req.status_code>= 400:
+        print("Error on key exchange: " + req.text)
+        print("Server error message: " + req.text)
+        return
+
     shared_key = private_key.exchange(peer_public_key)
 
     global CLIENT_WRITE_MAC_KEY
@@ -574,26 +663,29 @@ def main():
 
     CLIENT_WRITE_MAC_KEY, SERVER_WRITE_MAC_KEY, CLIENT_WRITE_KEY, SERVER_WRITE_KEY = getSessionkeys(CHOSEN_CIPHER_SUITE, shared_key,client_random,server_random)
     
+    #Send client finished message encrypted with generated keys
     e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/finished", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
     req = s.get(f'{SERVER_URL}/', params={'data':e})
     req= req.json()
+
+    if req.status_code== 404:
+        print("Different keys generated")
+        return
+
+    #Get servers finished message
     finished_data = req['data'].encode('latin')
 
     message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CIPHER_SUITE,finished_data)
 
-    print(message)
-    
-    e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/list", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
-    req = s.get(f'{SERVER_URL}/', params={'data':e})
-    print(req.status_code)
-    req = req.json()
-    list_data=  req['data'].encode('latin')
-    
+    #Check if finished message matches
+    if message != b'finished':
+        print("Different keys generated")
+        return
+    else:
+        print("Successfully connected with server!")
     
 
-
-
-    # send user authentication
+    # Send user authentication
     chain, signature = user_authentication(CHOSEN_CIPHER_SUITE)
 
     authorization_data = json.dumps({'url': 'api/auth','signature': signature.decode("latin"), 'certificate': chain})
@@ -602,29 +694,41 @@ def main():
 
     req = s.post(f'{SERVER_URL}/', data = {'data': e})
 
+    if req.status_code == 400:
+        req= req.json()
+        error_message = req['data'].encode('latin')
+        error_message = decrypt_comunication(SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,CHOSEN_CIPHER_SUITE,error_message)
+        print("Server error message when authenticating user")
+        print(error_message)
+        return
+    
+    print("User "+ USER_ID+ " authenticated successfully!")
 
+    # After authentication user can aquire licenses, list media and download musics
     while True:
         menu()
         selection = input("-> ")
         if selection.strip() == 'q':
-            e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/exit", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
-            req = s.get(f'{SERVER_URL}/', params={'data':e})
-            sys.exit(0)
+            quit_program(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY)
 
         if not selection.isdigit():
             continue
+        
+        #Get music and license list option
         if selection.strip() == '1':
             getMusicList(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY)
+        
+        #Download music option
         elif selection.strip() == '2':
             downloadMusic(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY)
+        
+        #Aquire License Option
         elif selection.strip()== '3':
             aquireLicense(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVER_WRITE_KEY,SERVER_WRITE_MAC_KEY,SERVER_PUBLIC_KEY)
+        
         else:
             continue
     
-    
-
-
 if __name__ == '__main__':
     while True:
         main()
