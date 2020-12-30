@@ -48,7 +48,7 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
                 'duration': 3*60+33,
                 'file_name': '898a08080d1840793122b7e118b27a95d117ebce.mp3',
                 'file_size': 3407202
-            }
+            },
             'bv7vin4xdir1ny1bkgzoevbwkc74ppeiysyhqstz':
             {
                 'name': 'E.R.F.',
@@ -57,7 +57,7 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
                 'duration': 4 * 60 + 41,
                 'file_name': 'bv7vin4xdir1ny1bkgzoevbwkc74ppeiysyhqstz.mp3',
                 'file_size': 6736456
-            }
+            },
             'b7twdi1w8h9r3065rp9vowruc1dos0578qag6pet':
             {
                 'name': 'JAZZY FRENCHY',
@@ -66,7 +66,7 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
                 'duration': 1 * 60 + 45,
                 'file_name': 'b7twdi1w8h9r3065rp9vowruc1dos0578qag6pet.mp3',
                 'file_size': 1467245
-            }
+            },
             '6novk8kn7idiad1bon32qvbq7rnzlh10uw15lnp5':
             {
                 'name': 'ACOUSTIC BREEZE',
@@ -75,7 +75,7 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
                 'duration': 2 * 60 + 37,
                 'file_name': '6novk8kn7idiad1bon32qvbq7rnzlh10uw15lnp5.mp3',
                 'file_size': 2200868
-            }
+            },
             '0woft9i8rz553vttlnc33yjzcs4li1a3mtt60e8v':
             {
                 'name': 'HAPPY ROCK',
@@ -248,24 +248,27 @@ class MediaServer(resource.Resource):
         h.update((client_id+user_id).encode("latin"))
         file_name= str(int.from_bytes(h.finalize(), byteorder='big'))+"_"+media_id
 
-        if file_name in files:
-            with open("./licenses/"+file_name) as json_file:
-                data = json.load(json_file)
-                if int(data["plays"])<=0 and chunk_id==0:
-                    os.remove("./licenses/"+file_name)
-                    request.setResponseCode(400)
-                    s = self.encrypt_comunication(b'User does not have a valid license',request.getSession())
-                    return json.dumps({'data':s.decode("latin")}).encode('latin')      
-        else:
-            request.setResponseCode(400)
-            s = self.encrypt_comunication(b'User does not have a valid license',request.getSession())
-            return json.dumps({'data':s.decode("latin")}).encode('latin')
-            
         if chunk_id==0:
-            data["plays"]= str(int(data["plays"])-1)
-            out_file= open("./licenses/"+file_name,"w")
-            json.dump(data, out_file,indent=6)
-            out_file.close()
+            if file_name in files:
+                with open("./licenses/"+file_name) as json_file:
+                    data = json.load(json_file)
+                    if int(data["plays"])<=0:
+                        os.remove("./licenses/"+file_name)
+                        request.setResponseCode(400)
+                        s = self.encrypt_comunication(b'User does not have a valid license',request.getSession())
+                        return json.dumps({'data':s.decode("latin")}).encode('latin')      
+            else:
+                request.setResponseCode(400)
+                s = self.encrypt_comunication(b'User does not have a valid license',request.getSession())
+                return json.dumps({'data':s.decode("latin")}).encode('latin')
+                
+            if int(data["plays"])==1:
+                os.remove("./licenses/"+file_name)
+            else:
+                data["plays"]= str(int(data["plays"])-1)
+                out_file= open("./licenses/"+file_name,"w")
+                json.dump(data, out_file,indent=6)
+                out_file.close()
 
         logger.debug(f'Download: chunk: {chunk_id}')
 

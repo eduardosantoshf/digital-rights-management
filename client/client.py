@@ -354,6 +354,7 @@ def getMusicList(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERVE
             (item['media']['id'] + item['media']['name'] + item['media']['description'] + str(item['media']['chunks']) + str(item['media']['duration'])).encode("latin")
         )
         print(f'{idx} - {item["media"]["name"]}')
+        idx+=1
     print("----")
 
     return media_list
@@ -459,7 +460,7 @@ def downloadMusic(CHOSEN_CIPHER_SUITE,CLIENT_WRITE_KEY,CLIENT_WRITE_MAC_KEY,SERV
     with open("./licenses/"+file_name) as json_file:
         data = json.load(json_file)
 
-    if int(data["plays"])<=0:
+    if int(data["plays"])==1:
         os.remove("./licenses/"+file_name)
     else:
         data["plays"]= str(int(data["plays"])-1)
