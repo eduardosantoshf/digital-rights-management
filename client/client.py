@@ -217,9 +217,8 @@ def user_authentication(cipher_suite):
     # mac
     #lib = '/usr/local/lib/libpteidpkcs11.dylib'
 
-    #linux
+    # linux
     lib = '/usr/local/lib/libpteidpkcs11.so'
-    #lib = '/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so'
 
     pkcs11 = PyKCS11.PyKCS11Lib()
     pkcs11.load(lib)
