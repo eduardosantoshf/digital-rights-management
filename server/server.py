@@ -60,10 +60,6 @@ class MediaServer(resource.Resource):
     # Send the list of media files to clients
     def do_list(self, request):
 
-        #auth = request.getHeader('Authorization')
-        #if not auth:
-        #    request.setResponseCode(401)
-        #    return 'Not authorized'
         session = request.getSession()
 
         if not 'user_id' in SESSIONS[session]:
@@ -74,7 +70,7 @@ class MediaServer(resource.Resource):
 
         cipher_suite = SESSIONS[session]['cipher_suite']
 
-        # Build list
+        # Build media list
         media_list = []
         for media_id in CATALOG:
             media = CATALOG[media_id]
@@ -98,23 +94,80 @@ class MediaServer(resource.Resource):
 
             print(media_data.encode("latin"))
 
+        #Build users license list
+        license_list=[]
+        files = os.listdir('./licenses/')
+        user_id= SESSIONS[session]['user_id']
+        client_id= SESSIONS[session]['client'].get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+
+        h= hashes.Hash(hashes.SHA1())
+        h.update((client_id+user_id).encode("latin"))
+        file_name= str(int.from_bytes(h.finalize(), byteorder='big'))
+
+        user_licences= [f for f in files if file_name in f ]
+        for user_licence in user_licences:
+            with open("./licenses/"+user_licence) as json_file:
+                data = json.load(json_file)
+                license_list.append({"media_id":data["media_id"],"plays":data["plays"]})
+
         # Return list to client
-        #TODO get license list
-        media_json= json.dumps({'media_list':media_list,'licence_list':'lista'})
+
+        media_json= json.dumps({'media_list':media_list,'licence_list':license_list})
         data =self.encrypt_comunication(media_json.encode("latin"), request.getSession())
 
         return json.dumps({'data':data.decode("latin")}).encode('latin')
 
+    def generate_license(self, music_id,license_type,request):
+        # Search media_id in the catalog
+        session = SESSIONS[request.getSession()]
+        if music_id not in CATALOG:
+            request.setResponseCode(404)
+            s = self.encrypt_comunication(b'Media file not found',request.getSession())
+            return json.dumps({'data':s.decode("latin")}).encode('latin')
+
+        if license_type not in ['1','5','10','20']:
+            request.setResponseCode(404)
+            s = self.encrypt_comunication(b'Invalid License',request.getSession())
+            return json.dumps({'data':s.decode("latin")}).encode('latin')
+        user_id= session['user_id']
+        client_id= session['client'].get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+        #client_name
+
+        license_json={
+            'client':client_id,
+            'user': user_id,
+            'plays': license_type,
+            'media_id': music_id 
+        }
+        
+        h= hashes.Hash(hashes.SHA1())
+        h.update((client_id+user_id).encode("latin"))
+        file_name= str(int.from_bytes(h.finalize(), byteorder='big'))
+
+        out_file= open("./licenses/"+file_name+"_"+music_id,"w")
+        json.dump(license_json, out_file,indent=6)
+        out_file.close()
+        file_content=open("./licenses/"+file_name+"_"+music_id,"rb")
+        license_data= file_content.read()
+
+        file_content.close()
+        license_signature = self.make_signature(session['cipher_suite'],license_data)
+
+        message_json= json.dumps({'license_signature': license_signature.decode("latin"),'license':license_data.decode("latin")})
+        s = self.encrypt_comunication(message_json.encode("latin"),request.getSession())
+        return json.dumps({'data':s.decode("latin")}).encode('latin')
 
     # Send a media chunk to the client
-    def do_download(self, args, session):
+    def do_download(self, args, request):
+        session= request.getSession()
         logger.debug(f'Download: args: {args}')
         
         # Check if the media_id is not None as it is required
         if 'id' not in args:
             request.setResponseCode(400)
-            request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps({'error': 'invalid media id'}).encode('latin')
+            s = self.encrypt_comunication(b'Invalid media id',request.getSession())
+            return json.dumps({'data':s.decode("latin")}).encode('latin')
+
         
         media_id = args['id']
         logger.debug(f'Download: id: {media_id}')
@@ -122,10 +175,10 @@ class MediaServer(resource.Resource):
 
         # Search media_id in the catalog
         if media_id not in CATALOG:
-            request.setResponseCode(404)
-            request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps({'error': 'media file not found'}).encode('latin')
-        
+            request.setResponseCode(400)
+            s = self.encrypt_comunication(b'Media file not found',request.getSession())
+            return json.dumps({'data':s.decode("latin")}).encode('latin')
+
         # Get the media item
         media_item = CATALOG[media_id]
 
@@ -142,9 +195,37 @@ class MediaServer(resource.Resource):
 
         if not valid_chunk:
             request.setResponseCode(400)
-            request.responseHeaders.addRawHeader(b"content-type", b"application/json")
-            return json.dumps({'error': 'invalid chunk id'}).encode('latin')
+            s = self.encrypt_comunication(b'Invalid chunk id',request.getSession())
+            return json.dumps({'data':s.decode("latin")}).encode('latin')
+        
+        #Check if user has a valid license
+        files = os.listdir('./licenses/')
+        user_id= SESSIONS[session]['user_id']
+        client_id= SESSIONS[session]['client'].get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+
+        h= hashes.Hash(hashes.SHA1())
+        h.update((client_id+user_id).encode("latin"))
+        file_name= str(int.from_bytes(h.finalize(), byteorder='big'))+"_"+media_id
+
+        if file_name in files:
+            with open("./licenses/"+file_name) as json_file:
+                data = json.load(json_file)
+                if int(data["plays"])<=0 and chunk_id==0:
+                    os.remove("./licenses/"+file_name)
+                    request.setResponseCode(400)
+                    s = self.encrypt_comunication(b'User does not have a valid license',request.getSession())
+                    return json.dumps({'data':s.decode("latin")}).encode('latin')      
+        else:
+            request.setResponseCode(400)
+            s = self.encrypt_comunication(b'User does not have a valid license',request.getSession())
+            return json.dumps({'data':s.decode("latin")}).encode('latin')
             
+        if chunk_id==0:
+            data["plays"]= str(int(data["plays"])-1)
+            out_file= open("./licenses/"+file_name,"w")
+            json.dump(data, out_file,indent=6)
+            out_file.close()
+
         logger.debug(f'Download: chunk: {chunk_id}')
 
         offset = chunk_id * CHUNK_SIZE
@@ -173,7 +254,7 @@ class MediaServer(resource.Resource):
                 ).encode('latin')
 
             data = self.encrypt_comunication(data,session,key=final_hash)
-            print(data)
+
             return json.dumps({'data':data.decode("latin")}).encode('latin')
 
         return json.dumps({'error': 'unknown'}, indent=4).encode('latin')
@@ -218,7 +299,7 @@ class MediaServer(resource.Resource):
 
         cert = x509.load_pem_x509_certificate(request.args[b'certificate'][0])
         #print(cert.not_valid_before)
-
+        SESSIONS[session]['client']= cert.subject
         DH_key = self.get_DH_Key(session,int(request.args[b'DH_PARAMETER'][0].decode()),cipher_suite)
         CLIENT_PUBLIC_KEY = cert.public_key()
 
@@ -257,10 +338,15 @@ class MediaServer(resource.Resource):
 
                     args = dict(parse.parse_qsl(parse.urlsplit(url).query))
 
-                    return self.do_download(args,request.getSession())
+                    return self.do_download(args,request)
                 elif b'api/exit' == path:
                     del SESSIONS[request.getSession()]
+                elif b'api/license' in path:
+                    url = 'http://127.0.0.1:8080/'+path.decode()
 
+                    args = dict(parse.parse_qsl(parse.urlsplit(url).query))
+                    return self.generate_license(args['id'],args['type'],request)
+                    
                 #request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
                 #return b'Methods: /api/protocols /api/list /api/download'
 
