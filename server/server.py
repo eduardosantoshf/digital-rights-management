@@ -357,6 +357,7 @@ class MediaServer(resource.Resource):
         # Note:
         # In normal conditions the server would have a list ordered by preferences
         # in the project context we will do a random
+        
         for csuite in client_cipher_suites:
             csuite = csuite.decode()
             if csuite in SERVER_CIPHER_SUITES:
