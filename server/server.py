@@ -36,7 +36,7 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
 
-SERVER_CIPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
+SERVER_CIPHER_SUITES = ['DHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 
 SESSIONS={}
 
@@ -48,6 +48,42 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
                 'duration': 3*60+33,
                 'file_name': '898a08080d1840793122b7e118b27a95d117ebce.mp3',
                 'file_size': 3407202
+            }
+            'bv7vin4xdir1ny1bkgzoevbwkc74ppeiysyhqstz':
+            {
+                'name': 'E.R.F.',
+                'album': '',
+                'description': 'Music: www.bensound.com',
+                'duration': 4 * 60 + 41,
+                'file_name': 'bv7vin4xdir1ny1bkgzoevbwkc74ppeiysyhqstz.mp3',
+                'file_size': 6736456
+            }
+            'b7twdi1w8h9r3065rp9vowruc1dos0578qag6pet':
+            {
+                'name': 'JAZZY FRENCHY',
+                'album': '',
+                'description': 'Music: www.bensound.com',
+                'duration': 1 * 60 + 45,
+                'file_name': 'b7twdi1w8h9r3065rp9vowruc1dos0578qag6pet.mp3',
+                'file_size': 1467245
+            }
+            '6novk8kn7idiad1bon32qvbq7rnzlh10uw15lnp5':
+            {
+                'name': 'ACOUSTIC BREEZE',
+                'album': '',
+                'description': 'Music: www.bensound.com',
+                'duration': 2 * 60 + 37,
+                'file_name': '6novk8kn7idiad1bon32qvbq7rnzlh10uw15lnp5.mp3',
+                'file_size': 2200868
+            }
+            '0woft9i8rz553vttlnc33yjzcs4li1a3mtt60e8v':
+            {
+                'name': 'HAPPY ROCK',
+                'album': '',
+                'description': 'Music: www.bensound.com',
+                'duration': 1 * 60 + 46,
+                'file_name': '0woft9i8rz553vttlnc33yjzcs4li1a3mtt60e8v.mp3',
+                'file_size': 1481873
             }
         }
 
@@ -112,8 +148,13 @@ class MediaServer(resource.Resource):
 
         # Return list to client
 
-        media_json= json.dumps({'media_list':media_list,'licence_list':license_list})
-        data =self.encrypt_comunication(media_json.encode("latin"), request.getSession())
+        media_json = json.dumps(
+            {
+                'media_list':media_list,
+                'licence_list':license_list
+            })
+
+        data = self.encrypt_comunication(media_json.encode("latin"), request.getSession())
 
         return json.dumps({'data':data.decode("latin")}).encode('latin')
 
@@ -250,7 +291,8 @@ class MediaServer(resource.Resource):
                         'media_id': media_id, 
                         'chunk': chunk_id, 
                         'data': binascii.b2a_base64(data).decode('latin').strip()
-                    },indent=4
+                    },
+                    indent = 4
                 ).encode('latin')
 
             data = self.encrypt_comunication(data,session,key=final_hash)
@@ -321,7 +363,7 @@ class MediaServer(resource.Resource):
             #elif request.uri == 'api/auth':
 
             else:
-                path =self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
+                path = self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
 
                 if path == b'api/finished':
                     SESSIONS[request.getSession()]['finished']= True

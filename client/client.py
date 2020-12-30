@@ -48,7 +48,7 @@ DISTRIBUTER_CERTIFICATE = open("../private_keys_and_certificates/distributor_cer
 #DISTRIBUTER_PUBLIC_KEY = DISTRIBUTER_CERTIFICATE.public_key()
 DISTRIBUTER_PUBLIC_KEY = x509.load_pem_x509_certificate(DISTRIBUTER_CERTIFICATE).public_key()
 
-CLIENT_CIPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
+CLIENT_CIPHER_SUITES = ['DHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 CHOSEN_CIPHER_SUITE = None
 
 s = requests.Session()
@@ -222,9 +222,8 @@ def user_authentication(cipher_suite):
     # mac
     #lib = '/usr/local/lib/libpteidpkcs11.dylib'
 
-    #linux
+    # linux
     lib = '/usr/local/lib/libpteidpkcs11.so'
-    #lib = '/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so'
 
     pkcs11 = PyKCS11.PyKCS11Lib()
     pkcs11.load(lib)
