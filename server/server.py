@@ -620,9 +620,10 @@ class MediaServer(resource.Resource):
 
         if not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)[0].value=='Cartão de Cidadão'):
             return False
-        
+
         c=x509.load_der_x509_certificate(cert_chain[1].encode("latin"))
         key_usage=c.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+        
         if ( key_usage.digital_signature or key_usage.content_commitment or key_usage.key_encipherment 
             or key_usage.data_encipherment or key_usage.key_agreement or not key_usage.key_cert_sign  
             or not  key_usage.crl_sign):
@@ -630,8 +631,9 @@ class MediaServer(resource.Resource):
         
         if not (c.not_valid_before< datetime.now()< c.not_valid_after):
             return False
-        
-        if not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)[0].value=='Cartão de Cidadão'):
+
+        if not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)[0].value=='Cartão de Cidadão' 
+        or c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)[0].value =='Instituto dos Registos e do Notariado I.P.'):
             return False
         
         c=x509.load_der_x509_certificate(cert_chain[2].encode("latin"))
@@ -644,6 +646,7 @@ class MediaServer(resource.Resource):
             return False
         if not (c.subject.get_attributes_for_oid(NameOID.ORGANIZATION_NAME)[0].value=='SCEE - Sistema de Certificação Electrónica do Estado'):
             return False
+        
 
         return True
 
