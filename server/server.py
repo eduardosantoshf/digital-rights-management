@@ -49,6 +49,42 @@ CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce':
                 'file_name': '898a08080d1840793122b7e118b27a95d117ebce.mp3',
                 'file_size': 3407202
             }
+            'bv7vin4xdir1ny1bkgzoevbwkc74ppeiysyhqstz':
+            {
+                'name': 'E.R.F.',
+                'album': '',
+                'description': 'Music: www.bensound.com',
+                'duration': 4 * 60 + 41,
+                'file_name': 'bv7vin4xdir1ny1bkgzoevbwkc74ppeiysyhqstz.mp3',
+                'file_size': 6736456
+            }
+            'b7twdi1w8h9r3065rp9vowruc1dos0578qag6pet':
+            {
+                'name': 'JAZZY FRENCHY',
+                'album': '',
+                'description': 'Music: www.bensound.com',
+                'duration': 1 * 60 + 45,
+                'file_name': 'b7twdi1w8h9r3065rp9vowruc1dos0578qag6pet.mp3',
+                'file_size': 1467245
+            }
+            '6novk8kn7idiad1bon32qvbq7rnzlh10uw15lnp5':
+            {
+                'name': 'ACOUSTIC BREEZE',
+                'album': '',
+                'description': 'Music: www.bensound.com',
+                'duration': 2 * 60 + 37,
+                'file_name': '6novk8kn7idiad1bon32qvbq7rnzlh10uw15lnp5.mp3',
+                'file_size': 2200868
+            }
+            '0woft9i8rz553vttlnc33yjzcs4li1a3mtt60e8v':
+            {
+                'name': 'HAPPY ROCK',
+                'album': '',
+                'description': 'Music: www.bensound.com',
+                'duration': 1 * 60 + 46,
+                'file_name': '0woft9i8rz553vttlnc33yjzcs4li1a3mtt60e8v.mp3',
+                'file_size': 1481873
+            }
         }
 
 CATALOG_BASE = 'catalog'
