@@ -19,12 +19,14 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+#SERVER PRIVATE KEY
 with open("../private_keys_and_certificates/server_private_key.pem", "rb") as key_file:
     SERVER_PRIVATE_KEY = serialization.load_pem_private_key(
         key_file.read(),
         password = None,
     )
 
+#DISTRIBUTOR PRIVATE KEY
 with open("../private_keys_and_certificates/distributor_private_key.pem", "rb") as key_file:
     DISTRIBUTOR_PRIVATE_KEY = serialization.load_pem_private_key(
         key_file.read(),
@@ -93,15 +95,17 @@ CHUNK_SIZE = 1024 * 4
 class MediaServer(resource.Resource):
     isLeaf = True
 
-    # Send the list of media files to clients
+
+    #-------Send the list of media files  and licenses to clients------#
+
     def do_list(self, request):
 
         session = request.getSession()
 
+        #User must be authenticated in order to get media and license list
         if not 'user_id' in SESSIONS[session]:
             request.setResponseCode(401)
-            s = self.encrypt_comunication(b'Not authorized',request.getSession())
-
+            s = self.encrypt_comunication(b'Not authorized',session)
             return json.dumps({'data':s.decode("latin")}).encode('latin')
 
         cipher_suite = SESSIONS[session]['cipher_suite']
@@ -111,6 +115,7 @@ class MediaServer(resource.Resource):
         for media_id in CATALOG:
             media = CATALOG[media_id]
 
+            # Sign media with distributor private key
             media_data = media_id + media['name'] + media['description'] + str(math.ceil(media['file_size'] / CHUNK_SIZE)) + str(media['duration'])
             dist_signature = self.make_signature(cipher_suite,media_data.encode("latin"), key = DISTRIBUTOR_PRIVATE_KEY)
 
@@ -127,8 +132,6 @@ class MediaServer(resource.Resource):
                     'distributor_signature':dist_signature.decode("latin")
 
                 })
-
-            print(media_data.encode("latin"))
 
         #Build users license list
         license_list=[]
@@ -154,25 +157,40 @@ class MediaServer(resource.Resource):
                 'licence_list':license_list
             })
 
-        data = self.encrypt_comunication(media_json.encode("latin"), request.getSession())
+        data = self.encrypt_comunication(media_json.encode("latin"), session)
 
         return json.dumps({'data':data.decode("latin")}).encode('latin')
 
+    #------------------------------------------------------------------#
+
+
+    #-------------------Generate a media license-----------------------#
+    
     def generate_license(self, music_id,license_type,request):
-        # Search media_id in the catalog
+
         session = SESSIONS[request.getSession()]
+
+        #User must be authenticated in order to generate media license
+        if not 'user_id' in session:
+            request.setResponseCode(401)
+            s = self.encrypt_comunication(b'Not authorized',request.getSession())
+            return json.dumps({'data':s.decode("latin")}).encode('latin')
+
+        # Check if media_id in the catalog
         if music_id not in CATALOG:
             request.setResponseCode(404)
             s = self.encrypt_comunication(b'Media file not found',request.getSession())
             return json.dumps({'data':s.decode("latin")}).encode('latin')
 
+        # Check if license type is valid
         if license_type not in ['1','5','10','20']:
             request.setResponseCode(404)
             s = self.encrypt_comunication(b'Invalid License',request.getSession())
             return json.dumps({'data':s.decode("latin")}).encode('latin')
+
+
         user_id= session['user_id']
         client_id= session['client'].get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
-        #client_name
 
         license_json={
             'client':client_id,
@@ -198,15 +216,25 @@ class MediaServer(resource.Resource):
         s = self.encrypt_comunication(message_json.encode("latin"),request.getSession())
         return json.dumps({'data':s.decode("latin")}).encode('latin')
 
-    # Send a media chunk to the client
+    #------------------------------------------------------------------#
+
+
+    #----------------Send a media chunk to the client------------------#
+
     def do_download(self, args, request):
         session= request.getSession()
         logger.debug(f'Download: args: {args}')
+
+        #User must be authenticated in order to do download
+        if not 'user_id' in SESSIONS[session]:
+            request.setResponseCode(401)
+            s = self.encrypt_comunication(b'Not authorized',session)
+            return json.dumps({'data':s.decode("latin")}).encode('latin')
         
         # Check if the media_id is not None as it is required
         if 'id' not in args:
             request.setResponseCode(400)
-            s = self.encrypt_comunication(b'Invalid media id',request.getSession())
+            s = self.encrypt_comunication(b'Invalid media id',session)
             return json.dumps({'data':s.decode("latin")}).encode('latin')
 
         
@@ -214,10 +242,10 @@ class MediaServer(resource.Resource):
         logger.debug(f'Download: id: {media_id}')
 
 
-        # Search media_id in the catalog
+        # Check if media_id in the catalog
         if media_id not in CATALOG:
             request.setResponseCode(400)
-            s = self.encrypt_comunication(b'Media file not found',request.getSession())
+            s = self.encrypt_comunication(b'Media file not found',session)
             return json.dumps({'data':s.decode("latin")}).encode('latin')
 
         # Get the media item
@@ -236,7 +264,7 @@ class MediaServer(resource.Resource):
 
         if not valid_chunk:
             request.setResponseCode(400)
-            s = self.encrypt_comunication(b'Invalid chunk id',request.getSession())
+            s = self.encrypt_comunication(b'Invalid chunk id',session)
             return json.dumps({'data':s.decode("latin")}).encode('latin')
         
         #Check if user has a valid license
@@ -255,11 +283,11 @@ class MediaServer(resource.Resource):
                     if int(data["plays"])<=0:
                         os.remove("./licenses/"+file_name)
                         request.setResponseCode(400)
-                        s = self.encrypt_comunication(b'User does not have a valid license',request.getSession())
+                        s = self.encrypt_comunication(b'User does not have a valid license',session)
                         return json.dumps({'data':s.decode("latin")}).encode('latin')      
             else:
                 request.setResponseCode(400)
-                s = self.encrypt_comunication(b'User does not have a valid license',request.getSession())
+                s = self.encrypt_comunication(b'User does not have a valid license',session)
                 return json.dumps({'data':s.decode("latin")}).encode('latin')
                 
             if int(data["plays"])==1:
@@ -299,15 +327,28 @@ class MediaServer(resource.Resource):
                 ).encode('latin')
 
             data = self.encrypt_comunication(data,session,key=final_hash)
-
             return json.dumps({'data':data.decode("latin")}).encode('latin')
 
-        return json.dumps({'error': 'unknown'}, indent=4).encode('latin')
+        #if file did not open
+        request.setResponseCode(500)
+        s = self.encrypt_comunication(b'Unknown error with media file',session)
+        return json.dumps({'data':s.decode("latin")}).encode('latin') 
 
+    #------------------------------------------------------------------#
+
+
+    #---------------------Client initial message-----------------------#
     def do_post_protocols(self, request):
-        session = request.getSession()       
-        client_cipher_suites = request.args.get(b'cipher_suite')
 
+        session = request.getSession()
+
+        # Check if cipher suites were sent
+        if 'cipher_suite' not in request.args:
+            request.setResponseCode(400)
+            s = self.encrypt_comunication(b'No cipher suite found',session)
+            return json.dumps({'data':s.decode("latin")}).encode('latin') 
+        
+        client_cipher_suites = request.args.get(b'cipher_suite')
         chosen_cipher_suite = None
 
         # choose cipher suite 
@@ -336,8 +377,19 @@ class MediaServer(resource.Resource):
 
         return json.dumps({'cipher_suite':chosen_cipher_suite, 'certificate':cert, 'server_random':server_random.decode('latin'), 'signature':signature.decode('latin'), 'y':y, 'p':p, 'g':g}).encode('latin')
 
+    #------------------------------------------------------------------#
+
+
+    #---------------Process client cert and session keys---------------#
+
     def do_key(self,request):
         session = request.getSession()
+
+        # Check if client sent the initial message
+        if session not in SESSIONS:
+            request.setResponseCode(400)
+            s = self.encrypt_comunication(b'Must exchange cipher suites first',session)
+            return json.dumps({'data':s.decode("latin")}).encode('latin') 
 
         cipher_suite = SESSIONS[session]['cipher_suite']
         #print(request.args[b'certificate'][0])
@@ -352,7 +404,11 @@ class MediaServer(resource.Resource):
         self.get_session_keys(session,cipher_suite,DH_key)
         
 
-    # Handle a GET request
+    #------------------------------------------------------------------#
+
+
+    #---------------------Handle a GET request-------------------------#
+     
     def render_GET(self, request):
         logger.debug(f'Received request for {request.uri}')
 
@@ -363,14 +419,14 @@ class MediaServer(resource.Resource):
             elif request.path == b'/api/key':
                 return self.do_key(request)
 
-            #elif request.uri == 'api/auth':
-
             else:
+                # Decrypt url path
                 path = self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
 
                 if path == b'api/finished':
-                    SESSIONS[request.getSession()]['finished']= True
 
+                    #Client has generated session keys sucessfully
+                    SESSIONS[request.getSession()]['finished']= True
                     s = self.encrypt_comunication(b'finished',request.getSession() )
 
                     return json.dumps({'data':s.decode("latin")}).encode('latin')
@@ -379,21 +435,26 @@ class MediaServer(resource.Resource):
                     return self.do_list(request)
 
                 elif b'api/download' in path:
-                    url = 'http://127.0.0.1:8080/'+path.decode()
 
+                    url = 'http://127.0.0.1:8080/'+path.decode()
                     args = dict(parse.parse_qsl(parse.urlsplit(url).query))
 
                     return self.do_download(args,request)
+
                 elif b'api/exit' == path:
+                    
+                    #Client exited, Session data deleted
                     del SESSIONS[request.getSession()]
+                    return b''
+
                 elif b'api/license' in path:
                     url = 'http://127.0.0.1:8080/'+path.decode()
 
                     args = dict(parse.parse_qsl(parse.urlsplit(url).query))
                     return self.generate_license(args['id'],args['type'],request)
                     
-                #request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
-                #return b'Methods: /api/protocols /api/list /api/download'
+                request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
+                return b'Methods: /api/protocols /api/list /api/download'
 
         except Exception as e:
             logger.exception(e)
@@ -401,7 +462,11 @@ class MediaServer(resource.Resource):
             request.responseHeaders.addRawHeader(b"content-type", b"text/plain")
             return b''
     
-    # Handle a POST request
+    #------------------------------------------------------------------#
+
+
+    #---------------------Handle a POST request------------------------#
+
     def render_POST(self, request):
         logger.debug(f'Received POST for {request.uri}')
         request.setResponseCode(501)
@@ -412,14 +477,6 @@ class MediaServer(resource.Resource):
 
             elif request.path == b'/api/key':
                 return self.do_key(request)
-            
-            #elif request.uri == 'api/auth':
-
-            elif request.path == b'/api/list':
-                return self.do_list(request)
-
-            elif request.path == b'/api/download':
-                return self.do_download(request)
 
             else:
                 session = request.getSession()
@@ -460,14 +517,17 @@ class MediaServer(resource.Resource):
                     #return json.dumps({'data':s.decode("latin")}).encode('latin')
                 
 
-                #request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
-                #return b'Methods: /api/protocols /api/list /api/download'
+                request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
+                return b'Methods: /api/protocols /api/list /api/download'
 
         except Exception as e:
             logger.exception(e)
             request.setResponseCode(500)
             request.responseHeaders.addRawHeader(b"content-type", b"text/plain")
             return b''
+
+    #------------------------------------------------------------------#
+
 
     #------------------ check user certificate chain ------------------#
 
@@ -483,25 +543,25 @@ class MediaServer(resource.Resource):
 
         return True 
 
-    """
-        CITIZEN AUTHENTICATION CERTIFICATE ATRIBUTES:
-        ORGANIZATION_NAME: Cartão de Cidadão
-        KEY_USAGE: digital_signature
-
-        AUTHENTICATION SUB CA:
-        ORGANIZATION_NAME: Cartão de Cidadão
-        KEY_USAGE: key_cert_sign=True, crl_sign=True
-
-        ROOT CA:
-        ORGANIZATION_NAME: SCEE - Sistema de Certificação Electrónica do Estado
-        KEY_USAGE: key_cert_sign=True, crl_sign=True
-
-    """
-
     #------------------------------------------------------------------#
 
 
     #---------------------- validate attributes -----------------------#
+
+        """
+            CITIZEN AUTHENTICATION CERTIFICATE ATRIBUTES:
+            ORGANIZATION_NAME: Cartão de Cidadão
+            KEY_USAGE: digital_signature
+
+            AUTHENTICATION SUB CA:
+            ORGANIZATION_NAME: Cartão de Cidadão
+            KEY_USAGE: key_cert_sign=True, crl_sign=True
+
+            ROOT CA:
+            ORGANIZATION_NAME: SCEE - Sistema de Certificação Electrónica do Estado
+            KEY_USAGE: key_cert_sign=True, crl_sign=True
+
+        """
 
     def validate_attributes(self,cert_chain):
         # CITIZEN AUTHENTICATION CERTIFICATE

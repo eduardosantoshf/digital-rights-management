@@ -43,15 +43,16 @@ CLIENT_COMMON_NAME=CLIENT_LOADED_CERTIFICATE.subject.get_attributes_for_oid(Name
 
 USER_ID=None
 
-# client knows the songs distributor
+# Client knows the songs distributor
 DISTRIBUTER_CERTIFICATE = open("../private_keys_and_certificates/distributor_certificate.pem",'rb').read()
-#DISTRIBUTER_PUBLIC_KEY = DISTRIBUTER_CERTIFICATE.public_key()
 DISTRIBUTER_PUBLIC_KEY = x509.load_pem_x509_certificate(DISTRIBUTER_CERTIFICATE).public_key()
 
 CLIENT_CIPHER_SUITES = ['DHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 CHOSEN_CIPHER_SUITE = None
 
 s = requests.Session()
+
+#---------------------Generate session keys------------------------#
 
 def getSessionkeys(cipher_suite, dh_key,client_random,server_random):
     if "SHA384" in cipher_suite:
@@ -78,6 +79,11 @@ def getSessionkeys(cipher_suite, dh_key,client_random,server_random):
 
     return c_w_mac_k, s_w_mac_k, c_w_k, s_w_k
 
+#------------------------------------------------------------------#
+
+
+#--------------------------Sign data-------------------------------#
+
 def make_signature(cipher_suite, data, key = CLIENT_PRIVATE_KEY):
     if "SHA384" in cipher_suite:
         signature = key.sign(
@@ -101,6 +107,11 @@ def make_signature(cipher_suite, data, key = CLIENT_PRIVATE_KEY):
     
     return signature
 
+#------------------------------------------------------------------#
+
+
+#---------------------Encrypt comunication-------------------------#
+
 def encrypt_comunication(cipher_suite, data, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY):
     if "AES256" in cipher_suite:
         iv = os.urandom(16)
@@ -121,6 +132,11 @@ def encrypt_comunication(cipher_suite, data, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_
     encrypted_data = encryptor.update(padding_data(data, 128)) + encryptor.finalize()
 
     return iv + generate_hmac(CLIENT_WRITE_MAC_KEY, cipher_suite,   iv +encrypted_data) + encrypted_data
+
+#------------------------------------------------------------------#
+
+
+#---------------------Decrypt comunication-------------------------#
 
 def decrypt_comunication(s_w_k, s_w_m_k,cipher_suite, data):
     if "AES256" in cipher_suite:
