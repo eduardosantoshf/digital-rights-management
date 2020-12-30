@@ -49,7 +49,7 @@ DISTRIBUTER_PUBLIC_KEY = x509.load_pem_x509_certificate(DISTRIBUTER_CERTIFICATE)
 
 CLIENT_CIPHER_SUITES = ['DHE_AES256_CBC_SHA384','DHE_AES256_CFB_SHA384','DHE_AES256_CFB_SHA256',
                         'DHE_AES128_CBC_SHA256','DHE_AES128_CBC_SHA384','DHE_AES128_CBF_SHA384',
-                        'DHE_ChaCha20_CBC_SHA384','DHE_ChaCha20_CFB_SHA384','DHE_ChaCha20_CFB_SHA256'
+                        'DHE_ChaCha20_SHA384','DHE_ChaCha20_SHA384','DHE_ChaCha20_SHA256'
                        ]
 CHOSEN_CIPHER_SUITE = None
 
@@ -57,28 +57,34 @@ s = requests.Session()
 
 #---------------------Generate session keys------------------------#
 
-def getSessionkeys(cipher_suite, dh_key,client_random,server_random):
+def get_session_keys(cipher_suite, dh_key, client_random, server_random):
     if "SHA384" in cipher_suite:
-        hash_type = hashes.SHA384()
-        size = 48
+            hash_type = hashes.SHA384()
+            size = 48
+
     elif "SHA256" in cipher_suite:
         hash_type = hashes.SHA256()
         size = 32
 
-    if "AES256" in cipher_suite:
-        hkdf = HKDF(
-            algorithm = hash_type,
-            length = 64 + size*2,
-            salt = client_random+server_random,
-            info = None
-        )
+    if "AES128" in cipher_suite:
+        cipher_size = 32
 
-        key = hkdf.derive(dh_key)
+    elif "AES256" in cipher_suite or "ChaCha20" in cipher_suite:
+        cipher_size = 64
+    
+    hkdf = HKDF(
+        algorithm = hash_type,
+        length = cipher_size + size * 2,
+        salt = client_random + server_random,
+        info = None
+    )
+    key = hkdf.derive(dh_key)
 
-        c_w_mac_k = key[:size]
-        s_w_mac_k = key[size:size*2]
-        c_w_k = key[size*2:size*2+32]
-        s_w_k = key[size*2+32:size*2+64]
+    # divide the key into 4 different keys
+    c_w_mac_k = key[:size]
+    s_w_mac_k = key[size:size * 2]
+    c_w_k = key[size * 2:size * 2 + (cipher_size // 2)]
+    s_w_k = key[size * 2 + (cipher_size // 2):size * 2 + cipher_size]
 
     return c_w_mac_k, s_w_mac_k, c_w_k, s_w_k
 
@@ -116,25 +122,40 @@ def make_signature(cipher_suite, data, key = CLIENT_PRIVATE_KEY):
 #---------------------Encrypt comunication-------------------------#
 
 def encrypt_comunication(cipher_suite, data, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY):
-    if "AES256" in cipher_suite:
-        iv = os.urandom(16)
-        cipher = Cipher(
-            algorithms.AES(CLIENT_WRITE_KEY),
-            modes.CBC(iv)
-        )
-    elif "AES256-GCM" in cipher_suite:
-        """
-        iv= os.urandom(12)
-        cipher = Cipher(
-            algorithms.AES(CLIENT_WRITE_KEY),
-            modes.(iv)
-        )
-        """
-    encryptor = cipher.encryptor()
+    iv = os.urandom(16)
 
-    encrypted_data = encryptor.update(padding_data(data, 128)) + encryptor.finalize()
+    if "AES256" in cipher_suite or "AES128" in cipher_suite:
+        if "CBC" in cipher_suite:
+            cipher = Cipher(
+                algorithms.AES(CLIENT_WRITE_KEY),
+                modes.CBC(iv)
+            )
 
-    return iv + generate_hmac(CLIENT_WRITE_MAC_KEY, cipher_suite,   iv +encrypted_data) + encrypted_data
+            encryptor = cipher.encryptor()
+
+            encrypted_data = encryptor.update(padding_data(data, 128)) + encryptor.finalize()
+
+        elif "CFB" in cipher_suite:
+            cipher = Cipher(
+                algorithms.AES(CLIENT_WRITE_KEY),
+                modes.CFB(iv)
+            )
+
+            encryptor = cipher.encryptor()
+
+            encrypted_data = encryptor.update(data) + encryptor.finalize()
+        
+    elif "ChaCha20" in cipher_suite:
+        cipher = Cipher(
+            algorithms.ChaCha20(CLIENT_WRITE_KEY, iv),
+            mode = None
+        )
+
+        encryptor = cipher.encryptor()
+
+        encrypted_data = encryptor.update(data) + encryptor.finalize()
+
+    return iv + generate_hmac(CLIENT_WRITE_MAC_KEY, cipher_suite, iv + encrypted_data) + encrypted_data
 
 #------------------------------------------------------------------#
 
@@ -142,12 +163,8 @@ def encrypt_comunication(cipher_suite, data, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_
 #---------------------Decrypt comunication-------------------------#
 
 def decrypt_comunication(s_w_k, s_w_m_k,cipher_suite, data):
-    if "AES256" in cipher_suite:
-        iv_size = 16
-        s_w_k=s_w_k[:32]
-    elif "AES256-GCM" in cipher_suite:
-        iv_size = 12
-        s_w_k=s_w_k[:32]
+    # for AES258, AES128 and ChaCha20, iv size is always 16
+    iv_size = 16
 
     if "SHA384" in cipher_suite:
         iv = data[:iv_size]
@@ -163,26 +180,47 @@ def decrypt_comunication(s_w_k, s_w_m_k,cipher_suite, data):
 
 
     if hmac == generate_hmac(s_w_m_k, cipher_suite, h_data):
-        m_data = decrypt_symetric(s_w_k,iv,cipher_suite,m_data)
-        unpadded_data = unpadding_data(m_data,128)
-        return unpadded_data
-    else:
-        return 0
+
+        m_data = decrypt_symetric(s_w_k, iv, cipher_suite, m_data)
+
+        if "CBC" in cipher_suite:
+            return unpadding_data(m_data,128)
+
+        return m_data
+
+    else: return 0
 
 #------------------------------------------------------------------#
 
 
 #-----------------------Decrypt symetric---------------------------#
 
-def decrypt_symetric(key,iv,cipher_suite,data):
-    if "AES256" in cipher_suite:
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.CBC(iv)
-        )
+def decrypt_symetric(key, iv, cipher_suite, data):
+    if "AES256" in cipher_suite or "AES128" in cipher_suite:
+        if "CBC" in cipher_suite:
+            cipher = Cipher(
+                algorithms.AES(key),
+                modes.CBC(iv)
+            )
+        elif "CFB" in cipher_suite:
+            cipher = Cipher(
+                algorithms.AES(key),
+                modes.CFB(iv)
+            )
+
         decryptor = cipher.decryptor()
 
         decrypted_data = decryptor.update(data) + decryptor.finalize()
+
+    elif "ChaCha20" in cipher_suite:
+        cipher = Cipher(
+            algorithms.ChaCha20(key, iv),
+            mode = None
+        )
+
+        decryptor = cipher.decryptor()
+
+        decrypted_data = decryptor.update(data)
 
     return decrypted_data
 
@@ -274,10 +312,10 @@ def verify_signature(signature, cipher_suite, key, data):
 def user_authentication(cipher_suite):
 
     # mac
-    #lib = '/usr/local/lib/libpteidpkcs11.dylib'
+    lib = '/usr/local/lib/libpteidpkcs11.dylib'
 
     # linux
-    lib = '/usr/local/lib/libpteidpkcs11.so'
+    #lib = '/usr/local/lib/libpteidpkcs11.so'
 
     pkcs11 = PyKCS11.PyKCS11Lib()
     pkcs11.load(lib)
@@ -661,16 +699,17 @@ def main():
     global SERVER_WRITE_MAC_KEY
     global SERVER_WRITE_KEY
 
-    CLIENT_WRITE_MAC_KEY, SERVER_WRITE_MAC_KEY, CLIENT_WRITE_KEY, SERVER_WRITE_KEY = getSessionkeys(CHOSEN_CIPHER_SUITE, shared_key,client_random,server_random)
+    CLIENT_WRITE_MAC_KEY, SERVER_WRITE_MAC_KEY, CLIENT_WRITE_KEY, SERVER_WRITE_KEY = get_session_keys(CHOSEN_CIPHER_SUITE, shared_key,client_random,server_random)
     
     #Send client finished message encrypted with generated keys
     e= encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/finished", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
     req = s.get(f'{SERVER_URL}/', params={'data':e})
-    req= req.json()
 
-    if req.status_code== 404:
+    if req.status_code == 404:
         print("Different keys generated")
         return
+
+    req = req.json()
 
     #Get servers finished message
     finished_data = req['data'].encode('latin')
