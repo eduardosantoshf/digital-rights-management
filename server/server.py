@@ -36,7 +36,7 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.DEBUG)
 
-SERVER_CIPHER_SUITES = ['ECDHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
+SERVER_CIPHER_SUITES = ['DHE_ECDSA_AES256-GCM_SHA384', 'DHE_RSA_AES256_SHA256']
 
 SESSIONS={}
 
@@ -100,8 +100,13 @@ class MediaServer(resource.Resource):
 
         # Return list to client
         #TODO get license list
-        media_json= json.dumps({'media_list':media_list,'licence_list':'lista'})
-        data =self.encrypt_comunication(media_json.encode("latin"), request.getSession())
+        media_json = json.dumps(
+            {
+                'media_list':media_list,
+                'licence_list':'lista'
+            })
+
+        data = self.encrypt_comunication(media_json.encode("latin"), request.getSession())
 
         return json.dumps({'data':data.decode("latin")}).encode('latin')
 
@@ -169,7 +174,8 @@ class MediaServer(resource.Resource):
                         'media_id': media_id, 
                         'chunk': chunk_id, 
                         'data': binascii.b2a_base64(data).decode('latin').strip()
-                    },indent=4
+                    },
+                    indent = 4
                 ).encode('latin')
 
             data = self.encrypt_comunication(data,session,key=final_hash)
@@ -240,7 +246,7 @@ class MediaServer(resource.Resource):
             #elif request.uri == 'api/auth':
 
             else:
-                path =self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
+                path = self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
 
                 if path == b'api/finished':
                     SESSIONS[request.getSession()]['finished']= True
