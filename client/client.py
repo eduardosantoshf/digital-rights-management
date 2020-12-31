@@ -61,6 +61,12 @@ CHOSEN_CIPHER_SUITE = None
 s = requests.Session()
 
 #---------------------Generate session keys------------------------#
+#                                                                  #
+#           Function to generate the 4 session keys.               #
+# Using a Hash Key Derivation Function to extend the key produced  #
+# in the DH key exchange, the salt is the client and server        #
+#                   randoms previously exchanged.                  #
+#------------------------------------------------------------------#
 
 def get_session_keys(cipher_suite, dh_key, client_random, server_random):
     if "SHA384" in cipher_suite:
@@ -97,6 +103,10 @@ def get_session_keys(cipher_suite, dh_key, client_random, server_random):
 
 
 #--------------------------Sign data-------------------------------#
+#                                                                  #
+#                   Function to sign a given data.                 #
+#           By default the key is the clients private key          #
+#------------------------------------------------------------------#
 
 def make_signature(cipher_suite, data, key = CLIENT_PRIVATE_KEY):
     if "SHA384" in cipher_suite:
@@ -125,6 +135,12 @@ def make_signature(cipher_suite, data, key = CLIENT_PRIVATE_KEY):
 
 
 #---------------------Encrypt comunication-------------------------#
+#                                                                  #
+#         Function to encrypt data using a block cipher.           #
+#      Used to encrypt the requests to send to the server.         #
+#     The function returns the IV used in the encryption, the      #
+#       encrypted data and an MAC of the IV + encrypted data.      #
+#------------------------------------------------------------------#
 
 def encrypt_comunication(cipher_suite, data, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY):
     iv = os.urandom(16)
@@ -166,6 +182,14 @@ def encrypt_comunication(cipher_suite, data, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_
 
 
 #---------------------Decrypt comunication-------------------------#
+#                                                                  #
+#               Function to decrypt and validate data.             #
+#        Used to decrypt the messages sent by the server.          #
+#     The function divides the data in IV, MAC, and encrypted      #
+# data. It then checks generates a MAC with the IV and encrypted   #
+# data and see if they are equal in the affirmative case decrypts  #
+#                           the data.                              #
+#------------------------------------------------------------------#
 
 def decrypt_comunication(s_w_k, s_w_m_k, cipher_suite, data):
     # for AES258, AES128 and ChaCha20, iv size is always 16
@@ -193,12 +217,17 @@ def decrypt_comunication(s_w_k, s_w_m_k, cipher_suite, data):
 
         return m_data
 
-    else: return 0
+    else: 
+        print("MAC invalid")
+        return None
 
 #------------------------------------------------------------------#
 
 
 #-----------------------Decrypt symetric---------------------------#
+#                                                                  #
+#         Function to decrypt data using a block cipher.           #
+#------------------------------------------------------------------#
 
 def decrypt_symetric(key, iv, cipher_suite, data):
     if "AES256" in cipher_suite or "AES128" in cipher_suite:
@@ -233,6 +262,9 @@ def decrypt_symetric(key, iv, cipher_suite, data):
 
 
 #-------------------------Padding Data-----------------------------#
+#                                                                  #
+#      Function to pad data given a number of padding bits.        #
+#------------------------------------------------------------------#
 
 def padding_data(data, bits):
     padder = real_padding.PKCS7(bits).padder()
@@ -245,6 +277,9 @@ def padding_data(data, bits):
 
 
 #------------------------Unpadding Data----------------------------#
+#                                                                  #
+#     Function to unpad data given a number of padding bits.       #
+#------------------------------------------------------------------#
 
 def unpadding_data(data, nbits):
     unpadder = real_padding.PKCS7(nbits).unpadder()
@@ -256,7 +291,10 @@ def unpadding_data(data, nbits):
 #------------------------------------------------------------------#
 
 
-#-------------------------Generate HMAC----------------------------#
+#--------------------------Generate MAC----------------------------#
+#                                                                  #
+#              Function generate a MAC on a given data             #
+#------------------------------------------------------------------#
 
 def generate_hmac(key, cipher_suite, data):
     if "SHA256" in cipher_suite:
@@ -273,6 +311,9 @@ def generate_hmac(key, cipher_suite, data):
 
 
 #------------------------Hash algorithm----------------------------#
+#                                                                  #
+#                Function to hash a given data                     #
+#------------------------------------------------------------------#
 
 def hash_stuff(cipher_suite, data):
         if "SHA256" in cipher_suite:
@@ -289,6 +330,10 @@ def hash_stuff(cipher_suite, data):
 
 
 #----------------------Verify a signature--------------------------#
+#                                                                  #
+#       Function to verify a signature made on a given data.       #
+#             The public key is passed as argument.                #
+#------------------------------------------------------------------#
 
 def verify_signature(signature, cipher_suite, key, data):
     if "SHA256" in cipher_suite:
@@ -313,6 +358,12 @@ def verify_signature(signature, cipher_suite, key, data):
 
 
 #------------------Verify a server certificate---------------------# 
+#                                                                  #
+#         Function used to validate the server certificate.        #
+#     It first checks the certificate atributes such as date of    #
+#   expiration, common name, and key usage. Then using the ROOT_CA #
+#    public key verifies if the certificate signature is valid.    #
+#------------------------------------------------------------------#
 
 def verify_server_certificate(server_cert):
     
@@ -344,6 +395,14 @@ def verify_server_certificate(server_cert):
 
 
 #----------------------Authenticate User---------------------------#
+#                                                                  #
+#               Function used to authenticate an user.             #
+#  libpteidpkcs11 library was used in order to be able to get the  #
+#            tokens from the Portuguese Citizen Card.              #
+# 3 certificates form the certification chain and are sent to the  #
+#  server along with a signature made using the user private key,  #
+#                   CITIZEN AUTHENTICATION KEY                     #
+#------------------------------------------------------------------#
 
 def user_authentication(cipher_suite):
 
@@ -420,7 +479,9 @@ def user_authentication(cipher_suite):
 
 
 #-------------------------Client Menu------------------------------#
-
+#                                                                  #
+#          Function used to print the client main menu.            #
+#------------------------------------------------------------------#
 def menu():
     print("|--------------------------------------|")
     print("|                 MENU                 |")
@@ -428,13 +489,16 @@ def menu():
 
     print("|----------  1 MUSIC LIST   -----------|")
     print("|--------  2 DOWNLOAD MUSIC   ---------|")
-    print("|--------  3 AQUIRE LICENSE   ---------|")
+    print("|-------- 3 ACQUIRE LICENSE  ----------|")
     print("|-------------  q QUIT   --------------|")
 
 #------------------------------------------------------------------#
 
 
 #----------------------Choose License Menu-------------------------#
+#                                                                  #
+#     Function used to print menu to choose the license type       #
+#------------------------------------------------------------------#
 
 def license_menu():
     print("|--------------------------------------|")
@@ -450,15 +514,21 @@ def license_menu():
 #------------------------------------------------------------------#
 
 
-#---------------------Cooroborate Licenses-------------------------#
+#----------------------Coroborate Licenses-------------------------#
+#                                                                  #
+#Function used to coroborate license information sent by the server#
+#------------------------------------------------------------------#
 
 def check_licenses(licence_list):
+
+    #Get all licenses from user
     files = os.listdir('./licenses/')
     h = hashes.Hash(hashes.SHA1())
     h.update((CLIENT_COMMON_NAME + USER_ID).encode("latin"))
     file_name = str(int.from_bytes(h.finalize(), byteorder = 'big'))
     user_licences = [f for f in files if file_name in f ]
 
+    # for each license see if the data sent by the user matches
     for user_licence in user_licences:
         with open("./licenses/" + user_licence) as json_file:
             data = json.load(json_file)
@@ -471,12 +541,17 @@ def check_licenses(licence_list):
 
 
 #-----------------Get Music and Licenses List----------------------#
+#                                                                  #
+#         Function used to get the music and license lists         #
+# The function sends a get request to the encrypted path api/list  #
+#  The server will responde with the media and license lists, the  #
+# media content is signed by the known distributor. The signatures #
+#          are verified. The license list is coroborated.          #
+#------------------------------------------------------------------#
 
 def getMusicList(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY, SERVER_WRITE_KEY, SERVER_WRITE_MAC_KEY):
     e = encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/list", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
     req = s.get(f'{SERVER_URL}/', params = {'data':e})
-
-    print(req.status_code)
 
     req = req.json()
     list_data = req['data'].encode('latin')
@@ -518,6 +593,13 @@ def getMusicList(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY, SE
 
 
 #------------------------Aquire a License--------------------------#
+#                                                                  #
+#                Function used to aquire a License                 #
+#   The user chooses a license type (1, 5, 10, 20 plays) and a     #
+#              license request is sent to the server.              #
+#      The license received is signed, the client validates the    #
+#               signature and stores the license.                  #
+#------------------------------------------------------------------#
 
 def aquireLicense(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY, SERVER_WRITE_KEY, SERVER_WRITE_MAC_KEY, SERVER_PUBLIC_KEY):
     media_list = getMusicList(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY, SERVER_WRITE_KEY, SERVER_WRITE_MAC_KEY)
@@ -601,6 +683,12 @@ def aquireLicense(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY, S
 
 
 #------------------------Download a Music--------------------------#
+#                                                                  #
+#                  Function used to play a music.                  #
+#  The user chooses a music to play and its license is checked, if #
+# valid, the client will countinuously send a request to the server#
+#   until the all chunks are played. The user license is updated.  #
+#------------------------------------------------------------------#
 
 def downloadMusic(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY, SERVER_WRITE_KEY, SERVER_WRITE_MAC_KEY):
     
@@ -703,12 +791,17 @@ def downloadMusic(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY, S
 
 
 #-------------------------------Quit-------------------------------#
+#                                                                  #
+#               Function used to quit the program.                 #
+#               Sends exit message to the server.                  #
+#------------------------------------------------------------------#
 
 def quit_program(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY):
     #Send exit message and close
     e = encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/exit", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
     req = s.get(f'{SERVER_URL}/', params={'data':e})
     sys.exit(0)
+
 
 def main():
     print("|--------------------------------------|")
@@ -779,11 +872,6 @@ def main():
         return
 
     shared_key = private_key.exchange(peer_public_key)
-
-    global CLIENT_WRITE_MAC_KEY
-    global CLIENT_WRITE_KEY
-    global SERVER_WRITE_MAC_KEY
-    global SERVER_WRITE_KEY
 
     CLIENT_WRITE_MAC_KEY, SERVER_WRITE_MAC_KEY, CLIENT_WRITE_KEY, SERVER_WRITE_KEY = get_session_keys(CHOSEN_CIPHER_SUITE, shared_key,client_random,server_random)
     
