@@ -27,5 +27,11 @@ as keys usadas na comunicação client-server devem ser guardadas num array ou d
 hash chain based scheme? explique plsssss
 
 
-ECDH - ECDSA - AES256-GCM - SHA384
+DH - ECDSA - AES256-GCM - SHA384
 DH - RSA - AES 256 (AES256) - SHA256
+
+uuids:
+bv7vin4xdir1ny1bkgzoevbwkc74ppeiysyhqstz
+6novk8kn7idiad1bon32qvbq7rnzlh10uw15lnp5
+0woft9i8rz553vttlnc33yjzcs4li1a3mtt60e8v
+b7twdi1w8h9r3065rp9vowruc1dos0578qag6pet
