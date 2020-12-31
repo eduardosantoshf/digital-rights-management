@@ -519,52 +519,45 @@ class MediaServer(resource.Resource):
         logger.debug(f'Received request for {request.uri}')
 
         try:
-            if request.path == b'/api/protocols':
-                return self.do_post_protocols(request)
+            # Decrypt url path
+            path = self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
 
-            elif request.path == b'/api/key':
-                return self.do_key(request)
+            if path == b'api/finished':
 
-            else:
-                # Decrypt url path
-                path = self.decrypt_comunication(request.getSession(), request.args[b'data'][0])
+                #Client has generated session keys sucessfully
+                SESSIONS[request.getSession()]['finished'] = True
+                s = self.encrypt_comunication(b'finished',request.getSession() )
 
-                if path == b'api/finished':
+                return json.dumps({'data':s.decode("latin")}).encode('latin')
 
-                    #Client has generated session keys sucessfully
-                    SESSIONS[request.getSession()]['finished'] = True
-                    s = self.encrypt_comunication(b'finished',request.getSession() )
+            elif path == b'api/list':
+                return self.do_list(request)
 
-                    return json.dumps({'data':s.decode("latin")}).encode('latin')
+            elif b'api/download' in path:
 
-                elif path == b'api/list':
-                    return self.do_list(request)
+                url = 'http://127.0.0.1:8080/' + path.decode()
+                args = dict(parse.parse_qsl(parse.urlsplit(url).query))
 
-                elif b'api/download' in path:
+                return self.do_download(args,request)
 
-                    url = 'http://127.0.0.1:8080/' + path.decode()
-                    args = dict(parse.parse_qsl(parse.urlsplit(url).query))
-
-                    return self.do_download(args,request)
-
-                elif b'api/exit' == path:
-                    
-                    #Client exited, Session data deleted
-                    del SESSIONS[request.getSession()]
-                    
-                    return b''
-
-                elif b'api/license' in path:
-                    url = 'http://127.0.0.1:8080/' + path.decode()
-
-                    args = dict(parse.parse_qsl(parse.urlsplit(url).query))
-
-                    return self.generate_license(args['id'],args['type'],request)
+            elif b'api/exit' == path:
                 
-                request.setResponseCode(404)   
-                request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
+                #Client exited, Session data deleted
+                del SESSIONS[request.getSession()]
+                
+                return b''
 
-                return b'Methods: /api/protocols /api/list /api/download'
+            elif b'api/license' in path:
+                url = 'http://127.0.0.1:8080/' + path.decode()
+
+                args = dict(parse.parse_qsl(parse.urlsplit(url).query))
+
+                return self.generate_license(args['id'],args['type'],request)
+            
+            request.setResponseCode(404)   
+            request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
+
+            return b'Methods: /api/finished /api/license /api/exit /api/download'
 
         except Exception as e:
             logger.exception(e)
@@ -634,7 +627,7 @@ class MediaServer(resource.Resource):
                 
                 request.setResponseCode(404)  
                 request.responseHeaders.addRawHeader(b"content-type", b'text/plain')
-                return b'Methods: /api/protocols /api/list /api/download'
+                return b'Methods: /api/protocols /api/key /api/auth'
 
         except Exception as e:
             logger.exception(e)

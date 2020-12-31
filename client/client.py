@@ -553,8 +553,6 @@ def getMusicList(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY, SE
     e = encrypt_comunication(CHOSEN_CIPHER_SUITE, b"api/list", CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY)
     req = s.get(f'{SERVER_URL}/', params = {'data':e})
 
-    print(req.status_code)
-
     req = req.json()
     list_data = req['data'].encode('latin')
     
