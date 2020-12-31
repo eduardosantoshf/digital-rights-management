@@ -21,18 +21,21 @@ from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 #SERVER PRIVATE KEY
-with open("../private_keys_and_certificates/server_private_key.pem", "rb") as key_file:
+with open("./Media_Server_Private_Key.pem", "rb") as key_file:
     SERVER_PRIVATE_KEY = serialization.load_pem_private_key(
         key_file.read(),
-        password = None,
+        password = b'xB&ke95S96@B!WJZ',
     )
 
 #DISTRIBUTOR PRIVATE KEY
-with open("../private_keys_and_certificates/distributor_private_key.pem", "rb") as key_file:
+with open("./Media_Distributor_Private_Key.pem", "rb") as key_file:
     DISTRIBUTOR_PRIVATE_KEY = serialization.load_pem_private_key(
         key_file.read(),
-        password = None,
+        password = b'kLc_j*taAC%9Dw9j',
     )
+
+#Root Certificate
+ROOT_CA = x509.load_pem_x509_certificate(open("../Media_CA.crt",'rb').read())
 
 logger = logging.getLogger('root')
 FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
@@ -46,7 +49,6 @@ SERVER_CIPHER_SUITES = ['DHE_AES256_CBC_SHA384','DHE_AES256_CFB_SHA384',
 
 SESSIONS={}
 
-FILE_DECRYPTION_IV = b'\xa4y\x15\xc5\x19\xf3\x11\x14IF\xb1\xd6?b\xde\xdf'
 FILE_DECRYPTION_KEY = b'MayTheCodeBeWithYou'
 FILE_DECRYPTION_SALT = b'IAmTheOneWhoCodes'
 
@@ -158,7 +160,7 @@ class MediaServer(resource.Resource):
         for user_licence in user_licences:
             with open("./licenses/"+user_licence) as json_file:
                 data = json.load(json_file)
-                license_list.append({"media_id":data["media_id"],"plays":data["plays"]})
+                license_list.append({"media_id":data["media_id"],"media_name":CATALOG[data["media_id"]]["name"],"plays":data["plays"]})
 
         # Return list to client
 
@@ -414,7 +416,7 @@ class MediaServer(resource.Resource):
 
         
         # load server's certificate
-        cert = open("../private_keys_and_certificates/server_certificate.pem",'rb').read().decode()
+        cert = open("./Media_Server.crt",'rb').read().decode()
 
         # server and client's randoms
         server_random = os.urandom(28)
@@ -451,15 +453,25 @@ class MediaServer(resource.Resource):
 
         cert = x509.load_pem_x509_certificate(request.args[b'certificate'][0])
 
-        SESSIONS[session]['client'] = cert.subject
         DH_key = self.get_DH_Key(session,int(request.args[b'DH_PARAMETER'][0].decode()),cipher_suite)
         CLIENT_PUBLIC_KEY = cert.public_key()
 
-        self.verify_signature(request.args[b'signature'][0], cipher_suite,CLIENT_PUBLIC_KEY, SESSIONS[session]['client_random'] + SESSIONS[session]['server_random'] + request.args[b'DH_PARAMETER'][0])
-        self.get_session_keys(session,cipher_suite,DH_key)
-        
-        request.setResponseCode(200)
+        #Verify Signature
+        try:
+            self.verify_signature(request.args[b'signature'][0], cipher_suite,CLIENT_PUBLIC_KEY, SESSIONS[session]['client_random'] + SESSIONS[session]['server_random'] + request.args[b'DH_PARAMETER'][0])
+        except:
+            request.setResponseCode(400)
+            return b'Invalid signature'
 
+        #Verify client certificate
+        if not self.verify_client_certificate(cert):
+            request.setResponseCode(400)
+            return b'Invalid certificate'
+
+        SESSIONS[session]['client'] = cert.subject
+        self.get_session_keys(session,cipher_suite,DH_key)
+
+        request.setResponseCode(200)
         return b''
         
 
@@ -725,6 +737,35 @@ class MediaServer(resource.Resource):
                     return False
             except:
                 logger.warning("no crl delta")
+
+        return True
+
+    #------------------------------------------------------------------#
+
+
+    #-------------------Validate Client Certificate--------------------#
+
+    def verify_client_certificate(self,cert):
+        # Validate certificate atributes
+        if not (cert.not_valid_before < datetime.now() < cert.not_valid_after):
+            return False
+        if not (cert.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value == 'Media Certification Authority'):
+            return False
+
+        key_usage = cert.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+        if not key_usage.digital_signature or not key_usage.key_encipherment  or not key_usage.key_agreement or key_usage.key_cert_sign or key_usage.crl_sign: 
+            return False  
+
+        #Check root CA signature
+        try:
+            ROOT_CA.public_key().verify(
+                cert.signature,
+                cert.tbs_certificate_bytes,
+                padding.PKCS1v15(),
+                cert.signature_hash_algorithm,
+            )
+        except: 
+            return False
 
         return True
 
@@ -1042,6 +1083,8 @@ class MediaServer(resource.Resource):
 
     #------------------------------------------------------------------#
 
+
+    #-------------------Decrypt music chunk data-----------------------#
     def decrypt_data(self, data, padding_flag):
         hkdf = HKDF(
             algorithm = hashes.SHA256(),
@@ -1062,7 +1105,6 @@ class MediaServer(resource.Resource):
 
         if padding_flag:
             data = self.unpadding_data(data, 128)
-            print("CARALHOOOOOOOOOOOOOOOOOO")
         
         return data
 

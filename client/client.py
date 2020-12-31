@@ -9,6 +9,7 @@ import sys
 import PyKCS11
 import binascii
 import platform
+from datetime import datetime
 from cryptography import x509
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import serialization, hashes, hmac
@@ -16,7 +17,7 @@ from cryptography.hazmat.primitives import padding as real_padding
 from cryptography.hazmat.primitives.asymmetric import padding, dh
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import NameOID,ExtensionOID
 
 
 logger = logging.getLogger('root')
@@ -24,10 +25,10 @@ FORMAT = "[%(filename)s:%(lineno)s - %(funcName)20s() ] %(message)s"
 logging.basicConfig(format=FORMAT)
 logger.setLevel(logging.INFO)
 
-with open("../private_keys_and_certificates/client_private_key.pem", "rb") as key_file:
+with open("./Media_Client_Private_Key.pem", "rb") as key_file:
     CLIENT_PRIVATE_KEY = serialization.load_pem_private_key(
         key_file.read(),
-        password = None,
+        password = b'k8V_R&WGe6v5De^4'
     )
 
 SERVER_URL = 'http://127.0.0.1:8080'
@@ -38,15 +39,17 @@ CLIENT_WRITE_KEY = None
 SERVER_WRITE_MAC_KEY = None
 SERVER_WRITE_KEY = None
 
-CLIENT_CERTIFICATE = open("../private_keys_and_certificates/client_certificate.pem",'rb').read().decode()
+CLIENT_CERTIFICATE = open("./Media_Client.crt",'rb').read().decode()
 
-CLIENT_LOADED_CERTIFICATE = x509.load_pem_x509_certificate(open("../private_keys_and_certificates/client_certificate.pem",'rb').read())
+CLIENT_LOADED_CERTIFICATE = x509.load_pem_x509_certificate(open("./Media_Client.crt",'rb').read())
 CLIENT_COMMON_NAME = CLIENT_LOADED_CERTIFICATE.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value
+
+ROOT_CA = x509.load_pem_x509_certificate(open("../Media_CA.crt",'rb').read())
 
 USER_ID = None
 
 # Client knows the songs distributor
-DISTRIBUTER_CERTIFICATE = open("../private_keys_and_certificates/distributor_certificate.pem",'rb').read()
+DISTRIBUTER_CERTIFICATE = open("../Media_Distributor.crt",'rb').read()
 DISTRIBUTER_PUBLIC_KEY = x509.load_pem_x509_certificate(DISTRIBUTER_CERTIFICATE).public_key()
 
 CLIENT_CIPHER_SUITES = ['DHE_AES256_CBC_SHA384','DHE_AES256_CFB_SHA384','DHE_AES256_CFB_SHA256',
@@ -309,17 +312,41 @@ def verify_signature(signature, cipher_suite, key, data):
 #------------------------------------------------------------------#
 
 
+#------------------Verify a server certificate---------------------# 
+
+def verify_server_certificate(server_cert):
+    
+    # Validate certificate atributes
+    if not (server_cert.not_valid_before < datetime.now() < server_cert.not_valid_after):
+        return False
+    if not (server_cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value == 'Media Server'):
+        return False
+    if not (server_cert.issuer.get_attributes_for_oid(NameOID.COMMON_NAME)[0].value == 'Media Certification Authority'):
+        return False
+    key_usage = server_cert.extensions.get_extension_for_oid(ExtensionOID.KEY_USAGE).value
+    if not key_usage.digital_signature or not key_usage.key_encipherment  or not key_usage.key_agreement or key_usage.key_cert_sign or key_usage.crl_sign: 
+        return False  
+
+    #Check root CA signature
+    try:
+        ROOT_CA.public_key().verify(
+            server_cert.signature,
+            server_cert.tbs_certificate_bytes,
+            padding.PKCS1v15(),
+            server_cert.signature_hash_algorithm,
+        )
+    except: 
+        return False
+
+    return True
+
+#------------------------------------------------------------------#
+
+
 #----------------------Authenticate User---------------------------#
 
 def user_authentication(cipher_suite):
 
-<<<<<<< HEAD
-    # mac
-    #lib = '/usr/local/lib/libpteidpkcs11.dylib'
-
-    # linux
-    lib = '/usr/local/lib/libpteidpkcs11.so'
-=======
     # chose lib location depending on the OS
     #macOS
     if platform.system() == 'Darwin':
@@ -327,7 +354,6 @@ def user_authentication(cipher_suite):
     #linux
     elif platform.system() == 'Linux':
         lib = '/usr/local/lib/libpteidpkcs11.so'
->>>>>>> 3b5f39c18d7c254974525fbf61621d57053772b0
 
     pkcs11 = PyKCS11.PyKCS11Lib()
     pkcs11.load(lib)
@@ -467,7 +493,7 @@ def getMusicList(CHOSEN_CIPHER_SUITE, CLIENT_WRITE_KEY, CLIENT_WRITE_MAC_KEY, SE
     else:
         print("USER LICENSES\n")
         for item in license_list:
-            print("\n     Media id: " + item['media_id'] + "    Number of plays " + item['plays'])
+            print(" Name: " + item['media_name'] + "    Number of Plays " + item['plays'])
         
         print("----")
 
@@ -713,17 +739,24 @@ def main():
     g = int(req['g'])
 
     cert = x509.load_pem_x509_certificate(req['certificate'].encode())
-    print(cert.not_valid_before)
 
+    #Verify Signature
     SERVER_PUBLIC_KEY = cert.public_key()
     CHOSEN_CIPHER_SUITE = req['cipher_suite']
 
-    verify_signature(
-        req['signature'].encode('latin'), 
-        CHOSEN_CIPHER_SUITE, 
-        SERVER_PUBLIC_KEY, 
-        client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode()
-    )
+    try:
+        verify_signature(
+            req['signature'].encode('latin'), 
+            CHOSEN_CIPHER_SUITE, 
+            SERVER_PUBLIC_KEY, 
+            client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode()
+        )
+    except:
+        print("Invalid server signature")
+
+    #Verify server certificate
+    if not verify_server_certificate(cert):
+        print("Invalid server certificate")
 
     pn = dh.DHParameterNumbers(p, g)
     parameters = pn.parameters()
