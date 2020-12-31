@@ -8,6 +8,7 @@ import binascii
 import json
 import os
 import math
+import random
 from urllib import parse
 from datetime import datetime
 from cryptography import x509
@@ -40,7 +41,7 @@ logger.setLevel(logging.DEBUG)
 
 SERVER_CIPHER_SUITES = ['DHE_AES256_CBC_SHA384','DHE_AES256_CFB_SHA384',
                         'DHE_AES128_CBC_SHA256','DHE_AES128_CBC_SHA384',
-                        'DHE_ChaCha20_CBC_SHA384','DHE_ChaCha20_CFB_SHA384','DHE_ChaCha20_CFB_SHA256'
+                        'DHE_ChaCha20_SHA384','DHE_ChaCha20_SHA384','DHE_ChaCha20_SHA256'
                        ]
 
 SESSIONS={}
@@ -161,6 +162,8 @@ class MediaServer(resource.Resource):
             })
 
         data = self.encrypt_comunication(media_json.encode("latin"), session)
+
+        request.setResponseCode(200)
 
         return json.dumps({'data':data.decode("latin")}).encode('latin')
 
@@ -329,12 +332,15 @@ class MediaServer(resource.Resource):
                     indent = 4
                 ).encode('latin')
 
+            request.setResponseCode(200)
+
             data = self.encrypt_comunication(data,session,key=final_hash)
             return json.dumps({'data':data.decode("latin")}).encode('latin')
 
         #if file did not open
         request.setResponseCode(500)
         s = self.encrypt_comunication(b'Unknown error with media file',session)
+
         return json.dumps({'data':s.decode("latin")}).encode('latin') 
 
     #------------------------------------------------------------------#
@@ -346,7 +352,7 @@ class MediaServer(resource.Resource):
         session = request.getSession()
 
         # Check if cipher suites were sent
-        if 'cipher_suite' not in request.args:
+        if b'cipher_suite' not in request.args:
             request.setResponseCode(400)
             return b'No cipher suite found'
         
@@ -357,12 +363,34 @@ class MediaServer(resource.Resource):
         # Note:
         # In normal conditions the server would have a list ordered by preferences
         # in the project context we will do a random
-        
+        '''
         for csuite in client_cipher_suites:
             csuite = csuite.decode()
             if csuite in SERVER_CIPHER_SUITES:
                 chosen_cipher_suite = csuite
                 break
+        '''
+        
+        '''
+        cipher suites: ['DHE_AES256_CBC_SHA384','DHE_AES256_CFB_SHA384',
+                        'DHE_AES128_CBC_SHA256','DHE_AES128_CBC_SHA384',
+                        'DHE_ChaCha20_CBC_SHA384','DHE_ChaCha20_CFB_SHA384','DHE_ChaCha20_CFB_SHA256'
+                       ]
+        '''
+        
+        csuite_list = []
+
+        for csuite in client_cipher_suites:
+            csuite_list.append(csuite.decode())
+
+        r = random.choice(csuite_list)
+
+        while not r in SERVER_CIPHER_SUITES:
+            r = random.choice(csuite_list)
+        
+        chosen_cipher_suite = r
+        
+        print("chosen cipher suite: ", chosen_cipher_suite)
 
         
         # load server's certificate
@@ -380,6 +408,8 @@ class MediaServer(resource.Resource):
 
         # generate signature
         signature = self.make_signature(chosen_cipher_suite, client_random + server_random + str(y).encode() + str(p).encode() + str(g).encode())
+
+        request.setResponseCode(200)
 
         return json.dumps({'cipher_suite':chosen_cipher_suite, 'certificate':cert, 'server_random':server_random.decode('latin'), 'signature':signature.decode('latin'), 'y':y, 'p':p, 'g':g}).encode('latin')
 
@@ -406,6 +436,10 @@ class MediaServer(resource.Resource):
 
         self.verify_signature(request.args[b'signature'][0], cipher_suite,CLIENT_PUBLIC_KEY, SESSIONS[session]['client_random']+ SESSIONS[session]['server_random'] + request.args[b'DH_PARAMETER'][0])
         self.get_session_keys(session,cipher_suite,DH_key)
+        
+        request.setResponseCode(200)
+
+        return b''
         
 
     #------------------------------------------------------------------#
@@ -506,6 +540,8 @@ class MediaServer(resource.Resource):
                             message = "user_ " + uid + "authenticated"
 
                             s = self.encrypt_comunication(message.encode("latin"), session)
+
+                            request.setResponseCode(200)
 
                             return json.dumps({'data':s.decode("latin")}).encode('latin')
                         
@@ -701,25 +737,40 @@ class MediaServer(resource.Resource):
         
         server_write_MAC_key = SESSIONS[session]['server_write_MAC_key']
 
-        if "AES256" in cipher_suite:
-            iv = os.urandom(16)
-            cipher = Cipher(
-                algorithms.AES(server_write_key[:32]),
-                modes.CBC(iv)
-            )
-        elif "AES256-GCM" in cipher_suite:
-            """
-            iv= os.urandom(12)
-            cipher = Cipher(
-                algorithms.AES(CLIENT_WRITE_KEY),
-                modes.(iv)
-            )
-            """
-        encryptor = cipher.encryptor()
+        iv = os.urandom(16)
 
-        encrypted_data = encryptor.update(self.padding_data(data, 128)) + encryptor.finalize()
+        if "AES256" in cipher_suite or "AES128" in cipher_suite:
+            if "CBC" in cipher_suite:
+                cipher = Cipher(
+                    algorithms.AES(server_write_key),
+                    modes.CBC(iv)
+                )
+            
+                encryptor = cipher.encryptor()
 
-        return iv + self.generate_hmac(server_write_MAC_key, cipher_suite, iv +encrypted_data) + encrypted_data
+                encrypted_data = encryptor.update(self.padding_data(data, 128)) + encryptor.finalize()
+
+            elif "CFB" in cipher_suite:
+                cipher = Cipher(
+                    algorithms.AES(server_write_key),
+                    modes.CFB(iv)
+                )
+            
+                encryptor = cipher.encryptor()
+
+                encrypted_data = encryptor.update(data) + encryptor.finalize()
+
+        elif "ChaCha20" in cipher_suite:
+            cipher = Cipher(
+                algorithms.ChaCha20(server_write_key, iv),
+                mode = None
+            )
+
+            encryptor = cipher.encryptor()
+
+            encrypted_data = encryptor.update(data) + encryptor.finalize()
+
+        return iv + self.generate_hmac(server_write_MAC_key, cipher_suite, iv + encrypted_data) + encrypted_data
 
     #------------------------------------------------------------------#
 
@@ -731,12 +782,8 @@ class MediaServer(resource.Resource):
         client_write_key = SESSIONS[session]['client_write_key']
         client_write_MAC_key = SESSIONS[session]['client_write_MAC_key']
 
-        # get iv size
-        if "AES256" in cipher_suite:
-            iv_size = 16
-            
-        elif "AES256-GCM" in cipher_suite:
-            iv_size = 12
+        # for AES258, AES128 and ChaCha20, iv size is always 16
+        iv_size = 16
 
         if "SHA384" in cipher_suite:
             iv = data[:iv_size]
@@ -753,9 +800,11 @@ class MediaServer(resource.Resource):
         if hmac == self.generate_hmac(client_write_MAC_key, cipher_suite, h_data):
 
             m_data = self.decrypt_symetric(client_write_key,iv,cipher_suite,m_data)
-            unpadded_data = self.unpadding_data(m_data,128)
 
-            return unpadded_data
+            if "CBC" in cipher_suite:
+                return self.unpadding_data(m_data,128)
+
+            return m_data
 
         else: return 0
 
@@ -789,14 +838,31 @@ class MediaServer(resource.Resource):
     #--------------------- symetric decryption ------------------------#
 
     def decrypt_symetric(self, key, iv, cipher_suite, data):
-        if "AES256" in cipher_suite:
-            cipher = Cipher(
-                algorithms.AES(key),
-                modes.CBC(iv)
-            )
+        if "AES256" in cipher_suite or "AES128" in cipher_suite:
+            if "CBC" in cipher_suite:
+                cipher = Cipher(
+                    algorithms.AES(key),
+                    modes.CBC(iv)
+                )
+            elif "CFB" in cipher_suite:
+                cipher = Cipher(
+                    algorithms.AES(key),
+                    modes.CFB(iv)
+                )
+
             decryptor = cipher.decryptor()
 
             decrypted_data = decryptor.update(data) + decryptor.finalize()
+
+        elif "ChaCha20" in cipher_suite:
+            cipher = Cipher(
+                algorithms.ChaCha20(key, iv),
+                mode = None
+            )
+
+            decryptor = cipher.decryptor()
+
+            decrypted_data = decryptor.update(data)
 
         return decrypted_data
 
@@ -924,20 +990,25 @@ class MediaServer(resource.Resource):
             hash_type = hashes.SHA256()
             size = 32
 
-        if "AES256" in cipher_suite:
-            hkdf = HKDF(
-                algorithm = hash_type,
-                length = 64 + size * 2,
-                salt = SESSIONS[session]['client_random'] + SESSIONS[session]['server_random'],
-                info = None
-            )
-            key = hkdf.derive(dh_key)
+        if "AES128" in cipher_suite:
+            cipher_size = 32
 
-            # divide the key into 4 different keys
-            SESSIONS[session]['client_write_MAC_key']=key[:size]
-            SESSIONS[session]['server_write_MAC_key']=key[size:size*2]
-            SESSIONS[session]['client_write_key']=key[size*2:size*2+32]
-            SESSIONS[session]['server_write_key']=key[size*2+32:size*2+64]
+        elif "AES256" in cipher_suite or "ChaCha20" in cipher_suite:
+            cipher_size = 64
+        
+        hkdf = HKDF(
+            algorithm = hash_type,
+            length = cipher_size + size * 2,
+            salt = SESSIONS[session]['client_random'] + SESSIONS[session]['server_random'],
+            info = None
+        )
+        key = hkdf.derive(dh_key)
+
+        # divide the key into 4 different keys
+        SESSIONS[session]['client_write_MAC_key'] = key[:size]
+        SESSIONS[session]['server_write_MAC_key'] = key[size:size * 2]
+        SESSIONS[session]['client_write_key'] = key[size * 2:size * 2 + (cipher_size // 2)]
+        SESSIONS[session]['server_write_key'] = key[size * 2 + (cipher_size // 2):size * 2 + cipher_size]
 
     #------------------------------------------------------------------#
 
