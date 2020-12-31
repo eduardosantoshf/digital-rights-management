@@ -46,6 +46,10 @@ SERVER_CIPHER_SUITES = ['DHE_AES256_CBC_SHA384','DHE_AES256_CFB_SHA384',
 
 SESSIONS={}
 
+FILE_DECRYPTION_IV = b'\xa4y\x15\xc5\x19\xf3\x11\x14IF\xb1\xd6?b\xde\xdf'
+FILE_DECRYPTION_KEY = b'MayTheCodeBeWithYou'
+FILE_DECRYPTION_SALT = b'IAmTheOneWhoCodes'
+
 CATALOG = { '898a08080d1840793122b7e118b27a95d117ebce': 
             {
                 'name': 'Sunny Afternoon - Upbeat Ukulele Background Music',
@@ -333,6 +337,8 @@ class MediaServer(resource.Resource):
             f.seek(offset)
 
             data = f.read(CHUNK_SIZE)
+
+            data = self.decrypt_data(data, chunk_id == math.ceil(media_item['file_size'] / CHUNK_SIZE))
 
             cipher_suite = SESSIONS[session]['cipher_suite']
             s_w_k = SESSIONS[session]['server_write_key']
@@ -1036,6 +1042,28 @@ class MediaServer(resource.Resource):
 
     #------------------------------------------------------------------#
 
+    def decrypt_data(self, data, padding_flag):
+        hkdf = HKDF(
+            algorithm = hashes.SHA256(),
+            length = 32,
+            salt = FILE_DECRYPTION_SALT,
+            info = None
+        )
+        key = hkdf.derive(FILE_DECRYPTION_KEY)
+
+        cipher = Cipher(
+                algorithms.AES(key),
+                modes.ECB()
+            )
+    
+        decryptor = cipher.decryptor()
+
+        data = decryptor.update(data) + decryptor.finalize()
+
+        if padding_flag:
+            data = self.unpadding_data(data, 128)
+        
+        return data
 
 print("Server started")
 print("URL is: http://IP:8080")
