@@ -5,7 +5,6 @@ https://thecybersecurityman.com/2018/04/25/https-the-tls-handshake-using-diffie-
 https://www.ibm.com/support/knowledgecenter/SSFKSJ_9.0.0/com.ibm.mq.sec.doc/q009930_.htm
 https://www.thesslstore.com/blog/explaining-ssl-handshake/
 https://www.cloudflare.com/learning/ssl/what-is-a-session-key/
-
 https://docs.twistedmatrix.com/en/twisted-18.9.0/web/howto/using-twistedweb.html
 
 dúvidas:
@@ -26,9 +25,14 @@ como guardar as licenças de cada client/user?
 as keys usadas na comunicação client-server devem ser guardadas num array ou dicionário no server?
 hash chain based scheme? explique plsssss
 
+cipher_suites = [
+                    'DHE_AES256_CBC_SHA384','DHE_AES256_CFB_SHA384',
+                    'DHE_AES128_CBC_SHA256','DHE_AES128_CBC_SHA384',
+                    'DHE_ChaCha20_SHA384','DHE_ChaCha20_SHA384',
+                    'DHE_ChaCha20_SHA256'
+                ]
 
-DH - ECDSA - AES256-GCM - SHA384
-DH - RSA - AES 256 (AES256) - SHA256
+certificates db pwd: mediapwd4#
 
 uuids:
 bv7vin4xdir1ny1bkgzoevbwkc74ppeiysyhqstz
