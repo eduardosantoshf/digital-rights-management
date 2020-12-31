@@ -338,7 +338,7 @@ class MediaServer(resource.Resource):
 
             data = f.read(CHUNK_SIZE)
 
-            data = self.decrypt_data(data, chunk_id == math.ceil(media_item['file_size'] / CHUNK_SIZE))
+            data = self.decrypt_data(data, chunk_id - 1 == math.ceil(media_item['file_size'] / CHUNK_SIZE))
 
             cipher_suite = SESSIONS[session]['cipher_suite']
             s_w_k = SESSIONS[session]['server_write_key']
@@ -1062,6 +1062,7 @@ class MediaServer(resource.Resource):
 
         if padding_flag:
             data = self.unpadding_data(data, 128)
+            print("CARALHOOOOOOOOOOOOOOOOOO")
         
         return data
 
