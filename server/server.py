@@ -34,7 +34,7 @@ with open("./Media_Distributor_Private_Key.pem", "rb") as key_file:
         password = b'kLc_j*taAC%9Dw9j',
     )
 
-#Root Certificate
+#ROOT CA CERTIFICATE
 ROOT_CA = x509.load_pem_x509_certificate(open("../Media_CA.crt",'rb').read())
 
 logger = logging.getLogger('root')
@@ -107,6 +107,13 @@ class MediaServer(resource.Resource):
 
 
     #-------Send the list of media files  and licenses to clients------#
+    #                                                                  #
+    #    Function called when a client sends a api/list request        #
+    #  Each media in the catalog will be signed using the distributor  #
+    #                            private key.                          #
+    # The server will scan its license store in order to fetch all     #
+    #          licenses from the user with the current client.         #
+    #------------------------------------------------------------------#
 
     def do_list(self, request):
 
@@ -179,7 +186,13 @@ class MediaServer(resource.Resource):
     #------------------------------------------------------------------#
 
 
-    #-------------------Generate a media license-----------------------#
+    #--------------------Generate a media license----------------------#
+    #                                                                  #
+    #    Function called when a client sends a api/license request.    #
+    # The server will generate a license based on the arguments passed #
+    #                          in the request.                         #
+    #     The license is stored and then sent to the client signed.    #
+    #------------------------------------------------------------------#
     
     def generate_license(self, music_id, license_type, request):
 
@@ -244,6 +257,13 @@ class MediaServer(resource.Resource):
 
 
     #----------------Send a media chunk to the client------------------#
+    #                                                                  #
+    #    Function called when a client sends a api/download request.   #
+    # The server will see if the user is authenticated and has a valid #
+    #                      license for that media.                     #
+    # It will then update the user license and decrypt the chunk to be #
+    #                         sent to the client.                      #
+    #------------------------------------------------------------------#
 
     def do_download(self, args, request):
         session = request.getSession()
@@ -384,6 +404,13 @@ class MediaServer(resource.Resource):
 
 
     #---------------------Client initial message-----------------------#
+    #                                                                  #
+    #   Function called when a client sends a api/protocols request.   #
+    # The server chooses a cipher suit based on the cipher suites list #
+    #                       sent by the client.                        #
+    #       The server generates a random and the DH parameters.       #
+    #   These will be sent signed along with the server certificate    #
+    #------------------------------------------------------------------#
     def do_post_protocols(self, request):
 
         session = request.getSession()
@@ -439,6 +466,11 @@ class MediaServer(resource.Resource):
 
 
     #---------------Process client cert and session keys---------------#
+    #                                                                  #
+    #      Function called when a client sends a api/keys request      #
+    #           It will validate the client certificate.               #
+    #             Then it will generate the session keys.              #
+    #------------------------------------------------------------------#
 
     def do_key(self,request):
         session = request.getSession()
@@ -479,6 +511,9 @@ class MediaServer(resource.Resource):
 
 
     #---------------------Handle a GET request-------------------------#
+    #                                                                  #
+    #              Function used to handle GET requests                #
+    #------------------------------------------------------------------#
      
     def render_GET(self, request):
         logger.debug(f'Received request for {request.uri}')
@@ -542,6 +577,9 @@ class MediaServer(resource.Resource):
 
 
     #---------------------Handle a POST request------------------------#
+    #                                                                  #
+    #             Function used to handle POST requests                #
+    #------------------------------------------------------------------#
 
     def render_POST(self, request):
         logger.debug(f'Received POST for {request.uri}')
@@ -608,6 +646,11 @@ class MediaServer(resource.Resource):
 
 
     #------------------ check user certificate chain ------------------#
+    #                                                                  #
+    #   Function used to check the user certificate chain regarding    #
+    #   the certificate attributes the certificates revogation lists   #
+    #                  and the certificates signatures.                #
+    #------------------------------------------------------------------#
 
     def check_user_cert_chain(self,cert_chain):
 
@@ -626,22 +669,24 @@ class MediaServer(resource.Resource):
 
 
     #---------------------- validate attributes -----------------------#
-
-        """
-            CITIZEN AUTHENTICATION CERTIFICATE ATRIBUTES:
-            ORGANIZATION_NAME: Cartão de Cidadão
-            KEY_USAGE: digital_signature
-
-            AUTHENTICATION SUB CA:
-            ORGANIZATION_NAME: Cartão de Cidadão
-            KEY_USAGE: key_cert_sign=True, crl_sign=True
-
-            ROOT CA:
-            ORGANIZATION_NAME: SCEE - Sistema de Certificação Electrónica do Estado
-            KEY_USAGE: key_cert_sign=True, crl_sign=True
-
-        """
-
+    #                                                                  #
+    #    Function used to validate the user chain of certificates      #
+    #             regarding the certificates atributes.                #
+    #                                                                  #
+    #                                                                  #
+    #  CITIZEN AUTHENTICATION CERTIFICATE ATRIBUTES:                   #
+    #  ORGANIZATION_NAME: Cartão de Cidadão                            #
+    #  KEY_USAGE: digital_signature                                    #
+    #                                                                  #
+    #  AUTHENTICATION SUB CA:                                          #
+    #  ORGANIZATION_NAME: Cartão de Cidadão                            #
+    #  KEY_USAGE: key_cert_sign=True, crl_sign=True                    #
+    #                                                                  #
+    #  ROOT CA:                                                        #
+    #  ORGANIZATION_NAME:                                              #
+    #       SCEE - Sistema de Certificação Electrónica do Estado       #
+    #  KEY_USAGE: key_cert_sign=True, crl_sign=True                    #
+    #------------------------------------------------------------------#
     def validate_attributes(self,cert_chain):
         # CITIZEN AUTHENTICATION CERTIFICATE
         c = x509.load_der_x509_certificate(cert_chain[0].encode("latin"))
@@ -693,6 +738,12 @@ class MediaServer(resource.Resource):
 
 
     #----------------- check certification signature ------------------#
+    #                                                                  #
+    #    Function used to validate a certificate chain regarding the   #
+    #                   certificates signatures.                       #
+    #   For each certificate, uses the issuer public key in order to   #
+    #                       verify its signature                       #
+    #------------------------------------------------------------------#
 
     def check_cert_signature(self,cert_chain):
         for cert in range(len(cert_chain) - 1):
@@ -716,7 +767,13 @@ class MediaServer(resource.Resource):
     #------------------------------------------------------------------#
 
 
-    #------------------------- validate crl --------------------------#
+    #------------------------- validate crl ---------------------------#
+    #                                                                  #
+    #    Function used to validate a certificate chain regarding the   #
+    #                    certificate revoked lists.                    #
+    # For each certificate fetches the respective crl and sees if the  #    
+    #            certificate serial number is in there.                #
+    #------------------------------------------------------------------#
 
     def validate_crl(self,cert_chain):
         for cert in range(len(cert_chain) - 1):
@@ -744,6 +801,12 @@ class MediaServer(resource.Resource):
 
 
     #-------------------Validate Client Certificate--------------------#
+    #                                                                  #
+    #          Function used to validate a client Cartificate.         #
+    #     It first checks the certificate atributes such as date of    #
+    #   expiration, common name, and key usage. Then using the ROOT_CA #
+    #    public key verifies if the certificate signature is valid.    #
+    #------------------------------------------------------------------#
 
     def verify_client_certificate(self,cert):
         # Validate certificate atributes
@@ -773,6 +836,12 @@ class MediaServer(resource.Resource):
 
 
     #--------------------- generate DH parameter ----------------------#
+    #                                                                  #
+    #           Function used to generate DH parameters.               #
+    #      The function generates the p, and g values and then Y       #
+    # This values are stored in the respective session in the SESSIONS #
+    #                           dictionary.                            #
+    #------------------------------------------------------------------#
     
     def generate_DH_parameter(self, session):
         
@@ -796,6 +865,12 @@ class MediaServer(resource.Resource):
 
 
     #--------------------- encrypt comunication -----------------------#
+    #                                                                  #
+    #         Function to encrypt data using a block cipher.           #
+    #      Used to encrypt the responses to send to the client.        #
+    #     The function returns the IV used in the encryption, the      #
+    #       encrypted data and an MAC of the IV + encrypted data.      #
+    #------------------------------------------------------------------#
 
     def encrypt_comunication(self, data, session, key = None):
         if not key:
@@ -847,6 +922,14 @@ class MediaServer(resource.Resource):
 
 
     #--------------------- decrypt comunication -----------------------#
+    #                                                                  #
+    #               Function to decrypt and validate data.             #
+    #        Used to decrypt the requests sent by the client.          #
+    #     The function divides the data in IV, MAC, and encrypted      #
+    # data. It then checks generates a MAC with the IV and encrypted   #
+    # data and see if they are equal in the affirmative case decrypts  #
+    #                           the data.                              #
+    #------------------------------------------------------------------#
 
     def decrypt_comunication(self, session, data):
         cipher_suite = SESSIONS[session]['cipher_suite']
@@ -883,6 +966,9 @@ class MediaServer(resource.Resource):
 
 
     #------------------------- padding data ---------------------------#
+    #                                                                  #
+    #      Function to pad data given a number of padding bits.        #
+    #------------------------------------------------------------------#
 
     def padding_data(self, data, bits):
         padder = real_padding.PKCS7(bits).padder()
@@ -895,6 +981,9 @@ class MediaServer(resource.Resource):
 
 
     #------------------------ unpadding data --------------------------#
+    #                                                                  #
+    #     Function to unpad data given a number of padding bits.       #
+    #------------------------------------------------------------------#
 
     def unpadding_data(self, data, nbits):
         unpadder = real_padding.PKCS7(nbits).unpadder()
@@ -907,6 +996,9 @@ class MediaServer(resource.Resource):
 
 
     #--------------------- symetric decryption ------------------------#
+    #                                                                  #
+    #       Function used to decrypt data using a block cipher.        #
+    #------------------------------------------------------------------#
 
     def decrypt_symetric(self, key, iv, cipher_suite, data):
         if "AES256" in cipher_suite or "AES128" in cipher_suite:
@@ -941,6 +1033,9 @@ class MediaServer(resource.Resource):
 
 
     #------------------- generate hmac from data ----------------------#
+    #                                                                  #
+    #         Function used to generate a MAC on a given data          #
+    #------------------------------------------------------------------#
 
     def generate_hmac(self, key, cipher_suite, data):
         if "SHA256" in cipher_suite:
@@ -957,6 +1052,9 @@ class MediaServer(resource.Resource):
 
 
     #-------------------------- hash data -----------------------------#
+    #                                                                  #
+    #                Function to hash a given data                     #
+    #------------------------------------------------------------------#
 
     def hash(self, cipher_suite, data):
         if "SHA256" in cipher_suite:
@@ -973,6 +1071,10 @@ class MediaServer(resource.Resource):
 
 
     #----------------------- make signature ---------------------------#
+    #                                                                  #
+    #              Function used  to sign a given data.                #
+    #           By default the key is the servers private key          #
+    #------------------------------------------------------------------#
     
     def make_signature(self, cipher_suite, data, key = SERVER_PRIVATE_KEY):
         if "SHA384" in cipher_suite:
@@ -1001,6 +1103,10 @@ class MediaServer(resource.Resource):
 
 
     #-------------------- verify user signature -----------------------#
+    #                                                                  #
+    #        Function used to verify a signature made by the user      #
+    #                   CITIZEN AUTHENTICATION KEY.                    #
+    #------------------------------------------------------------------#
 
     def user_verify_signature(self, signature, pub_key, data):
         pub_key.verify(
@@ -1014,6 +1120,10 @@ class MediaServer(resource.Resource):
 
 
     #----------------------- verify signature -------------------------#
+    #                                                                  #
+    #       Function to verify a signature made on a given data.       #
+    #             The public key is passed as argument.                #
+    #------------------------------------------------------------------#
 
     def verify_signature(self, signature, cipher_suite, pub_key, data):
         if "SHA384" in cipher_suite:
@@ -1038,6 +1148,10 @@ class MediaServer(resource.Resource):
 
 
     #-------------------------- get DH key ----------------------------#
+    #                                                                  #
+    #   Function used to do the DH key exchange in order to get a key. #
+    #       It receives as argument the exchanged parameter            #
+    #------------------------------------------------------------------#
 
     def get_DH_Key(self, session, y, cipher_suite):
         peer_public_numbers = dh.DHPublicNumbers(y, SESSIONS[session]['parameters'])
@@ -1050,7 +1164,15 @@ class MediaServer(resource.Resource):
     #------------------------------------------------------------------#
 
 
-    #----------------------- get session keys -------------------------#
+    #----------------------- Get Session Keys -------------------------#
+    #                                                                  #
+    #           Function to generate the 4 session keys.               #
+    # Using a Hash Key Derivation Function to extend the key produced  #
+    #     in the DH key exchange, the salt is the client and server    #
+    #                   randoms previously exchanged.                  #
+    #  The keys are stored in the respective session in the SESSIONS   #
+    #                           dictionary.                            #
+    #------------------------------------------------------------------#
 
     def get_session_keys(self, session, cipher_suite, dh_key):
         if "SHA384" in cipher_suite:
@@ -1085,6 +1207,12 @@ class MediaServer(resource.Resource):
 
 
     #-------------------Decrypt music chunk data-----------------------#
+    #                                                                  #
+    #         Function used to decrypt a music chunk data              #
+    #   The paddig_falg is True when the chunk is the last one and     #
+    #                    therfore needs padding.                       #
+    #------------------------------------------------------------------#
+
     def decrypt_data(self, data, padding_flag):
         hkdf = HKDF(
             algorithm = hashes.SHA256(),
