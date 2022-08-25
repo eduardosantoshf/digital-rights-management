@@ -1,4 +1,4 @@
-﻿# SecondAndThirdSIOProjects
+﻿# Second and Third SIO Projects
 
 This work aims to explore concepts associated with a **secure media player**, which enables clients to consume media content from a catalog, while enforcing **strong restrictions** through the use of **cryptographic primitives**.
 
@@ -48,6 +48,11 @@ python3 client/client.py
 * [**Twisted**](https://github.com/twisted/twisted) python framework.
 * [**Requests**](https://github.com/psf/requests) package.
 * In order to actually play media, the client relies on the **ffplay** tool from the [**FFmpeg**](https://github.com/FFmpeg/FFmpeg) project, and its capability of playing music provided from the **stdin**.
+
+## Grades
+This project's grades were:
+* 2nd project: **20** out of 20
+* 3rd project: **16,16** out of 20
 
 ## Authors
 * **Eduardo Santos**: [eduardosantoshf](https://github.com/eduardosantoshf)
